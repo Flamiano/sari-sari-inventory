@@ -36,10 +36,10 @@ export default function LoginPage() {
         setErrors({});
         setLoading(true);
 
+        // FIX: Removed persistSession from options to resolve Type Error
         const { error } = await supabase.auth.signInWithPassword({
             email: form.email,
             password: form.password,
-            options: { persistSession: form.remember },
         });
 
         if (error) {
@@ -81,18 +81,14 @@ export default function LoginPage() {
                 <aside className="hidden lg:flex w-[480px] xl:w-[520px] flex-shrink-0 flex-col relative overflow-hidden"
                     style={{ background: "linear-gradient(155deg, #050E1F 0%, #0c1f4a 50%, #1346a0 100%)" }}>
 
-                    {/* Animated grid */}
                     <div className="absolute inset-0 pointer-events-none opacity-[0.06]"
                         style={{ backgroundImage: "linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)", backgroundSize: "36px 36px", animation: "gridFloat 25s linear infinite" }} />
 
-                    {/* Glows */}
                     <div className="absolute pointer-events-none" style={{ top: -80, right: -80, width: 400, height: 400, background: "radial-gradient(circle, rgba(59,130,246,0.2) 0%, transparent 65%)" }} />
                     <div className="absolute pointer-events-none" style={{ bottom: -60, left: -60, width: 350, height: 350, background: "radial-gradient(circle, rgba(251,191,36,0.1) 0%, transparent 65%)" }} />
                     <div className="absolute pointer-events-none" style={{ top: "40%", left: "50%", transform: "translate(-50%, -50%)", width: 300, height: 300, background: "radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 65%)" }} />
 
-                    {/* Content */}
                     <div className="relative z-10 flex flex-col h-full p-10 xl:p-12">
-                        {/* Logo */}
                         <Link href="/" className="flex items-center gap-3 no-underline mb-auto">
                             <div className="relative w-10 h-10 flex-shrink-0">
                                 <Image src="/images/logo.png" alt="SariSari IMS" fill className="object-contain rounded-xl" sizes="40px" />
@@ -105,7 +101,6 @@ export default function LoginPage() {
                             </div>
                         </Link>
 
-                        {/* Main copy */}
                         <div className="my-auto">
                             <div className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 mb-7"
                                 style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)" }}>
@@ -138,7 +133,6 @@ export default function LoginPage() {
                             </div>
                         </div>
 
-                        {/* Bottom stat cards */}
                         <div className="grid grid-cols-3 gap-3 mt-auto">
                             {[
                                 { val: "24/7", label: "Store Access" },
@@ -155,13 +149,11 @@ export default function LoginPage() {
                     </div>
                 </aside>
 
-                {/* ── RIGHT PANEL ── */}
                 <main className="flex-1 flex items-center justify-center bg-[#F7F9FC] p-6 md:p-10 overflow-y-auto">
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                         className="w-full max-w-[420px]">
 
-                        {/* Mobile logo */}
                         <Link href="/" className="lg:hidden flex items-center gap-2.5 no-underline mb-8">
                             <div className="relative w-8 h-8">
                                 <Image src="/images/logo.png" alt="Logo" fill className="object-contain rounded-lg" sizes="32px" />
@@ -171,7 +163,6 @@ export default function LoginPage() {
                             </span>
                         </Link>
 
-                        {/* Header */}
                         <div className="mb-8">
                             <p className="text-blue-600 text-[0.7rem] font-bold uppercase tracking-[0.2em] mb-2">Welcome back</p>
                             <h1 className="font-black text-slate-900 leading-[1.1] mb-2"
@@ -181,10 +172,8 @@ export default function LoginPage() {
                             <p className="text-slate-400 text-[0.9rem]">Enter your credentials to continue.</p>
                         </div>
 
-                        {/* Form */}
                         <form onSubmit={handleSubmit} noValidate className="space-y-4">
 
-                            {/* Email */}
                             <div>
                                 <label className="block text-[0.78rem] font-bold text-slate-700 mb-1.5">Email Address</label>
                                 <div className="relative">
@@ -194,14 +183,11 @@ export default function LoginPage() {
                                         onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setErrors(v => ({ ...v, email: undefined })); }}
                                         className="w-full pl-10 pr-4 py-3 rounded-xl text-[0.9rem] text-slate-800 bg-white outline-none transition-all"
                                         style={{ border: errors.email ? "1.5px solid #ef4444" : "1.5px solid #e2e8f0", boxShadow: errors.email ? "0 0 0 3px rgba(239,68,68,0.08)" : "none" }}
-                                        onFocus={e => { if (!errors.email) { e.target.style.borderColor = "#2563eb"; e.target.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.1)"; } }}
-                                        onBlur={e => { if (!errors.email) { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; } }}
                                     />
                                 </div>
                                 {errors.email && <p className="text-[0.75rem] text-red-500 mt-1">{errors.email}</p>}
                             </div>
 
-                            {/* Password */}
                             <div>
                                 <label className="block text-[0.78rem] font-bold text-slate-700 mb-1.5">Password</label>
                                 <div className="relative">
@@ -211,8 +197,6 @@ export default function LoginPage() {
                                         onChange={e => { setForm(f => ({ ...f, password: e.target.value })); setErrors(v => ({ ...v, password: undefined })); }}
                                         className="w-full pl-10 pr-11 py-3 rounded-xl text-[0.9rem] text-slate-800 bg-white outline-none transition-all"
                                         style={{ border: errors.password ? "1.5px solid #ef4444" : "1.5px solid #e2e8f0", boxShadow: errors.password ? "0 0 0 3px rgba(239,68,68,0.08)" : "none" }}
-                                        onFocus={e => { if (!errors.password) { e.target.style.borderColor = "#2563eb"; e.target.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.1)"; } }}
-                                        onBlur={e => { if (!errors.password) { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; } }}
                                     />
                                     <button type="button" onClick={() => setShowPassword(v => !v)}
                                         className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 transition-colors">
@@ -222,7 +206,6 @@ export default function LoginPage() {
                                 {errors.password && <p className="text-[0.75rem] text-red-500 mt-1">{errors.password}</p>}
                             </div>
 
-                            {/* Remember + Forgot */}
                             <div className="flex items-center justify-between pt-1">
                                 <label className="flex items-center gap-2 cursor-pointer">
                                     <input type="checkbox" checked={form.remember}
@@ -235,7 +218,6 @@ export default function LoginPage() {
                                 </Link>
                             </div>
 
-                            {/* Submit */}
                             <button type="submit" disabled={loading}
                                 className="w-full relative overflow-hidden flex items-center justify-center gap-2.5 font-bold text-white py-3.5 rounded-xl transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed mt-2"
                                 style={{ background: "linear-gradient(135deg, #2563eb, #1d4ed8)", boxShadow: "0 8px 24px rgba(37,99,235,0.3)", fontFamily: "Syne, sans-serif", fontSize: "0.92rem", letterSpacing: "0.01em" }}>
@@ -249,7 +231,6 @@ export default function LoginPage() {
                             </button>
                         </form>
 
-                        {/* Divider */}
                         <div className="flex items-center gap-3 my-6">
                             <div className="flex-1 h-px bg-slate-100" />
                             <span className="text-slate-300 text-[0.72rem] font-semibold">OR</span>
