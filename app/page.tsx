@@ -5,11 +5,11 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion, useInView, useScroll, useTransform } from "framer-motion";
 import {
-  Package, ShoppingCart, Users, TrendingUp,
+  Package, Users,
   Zap, Shield, Globe, ArrowRight, Star, CheckCircle,
   Bell, Database, RefreshCw,
   Store, Receipt, CreditCard, PieChart, Clock,
-  MessageCircle, BarChart3, ChevronDown,
+  MessageCircle, ChevronDown,
   Download, Smartphone, Monitor, Award, Play
 } from "lucide-react";
 import { supabase } from "@/app/utils/supabase";
@@ -536,10 +536,6 @@ export default function SariSariLandingPage() {
                     <Link href="/register"
                       className="inline-flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-300 text-slate-900 font-bold text-sm rounded-xl px-7 py-4 transition-all duration-200 shadow-xl shadow-amber-500/20">
                       <Download size={15} /> Create Free Account
-                    </Link>
-                    <Link href="/dashboard"
-                      className="inline-flex items-center justify-center gap-2 bg-white/6 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white font-semibold text-sm rounded-xl px-7 py-4 transition-all duration-200">
-                      <BarChart3 size={15} /> View Dashboard
                     </Link>
                   </div>
                 </div>
