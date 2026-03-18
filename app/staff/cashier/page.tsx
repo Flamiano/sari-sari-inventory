@@ -26,7 +26,7 @@ export default function CashierPage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Set viewport-fit=cover so the bottom nav covers the system nav bar
+        // Set viewport-fit=cover so the bottom nav sits flush against the system bar on mobile
         const existing = document.querySelector('meta[name="viewport"]');
         const content = "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content";
         if (existing) {
@@ -55,14 +55,33 @@ export default function CashierPage() {
 
                 setStaff(session);
 
-                // Use async/await instead of .then().finally() — avoids PromiseLike issue
-                const { data } = await supabase
-                    .from("profiles")
-                    .select("store_name, full_name")
-                    .eq("id", session.owner_id)
-                    .single();
+                // Fetch owner profile via SECURITY DEFINER RPC so the anon
+                // client can read the owner's profiles row without RLS blocking it.
+                // Falls back to a direct query in case the RPC is not yet deployed.
+                let storeName: string | null = null;
+                let fullName: string | null = null;
 
-                if (data) setOwnerProfile(data as OwnerProfile);
+                const { data: rpcData, error: rpcErr } = await supabase
+                    .rpc("get_owner_profile", { p_owner_id: session.owner_id });
+
+                if (!rpcErr && rpcData && rpcData.length > 0) {
+                    storeName = rpcData[0].store_name ?? null;
+                    fullName = rpcData[0].full_name ?? null;
+                } else {
+                    const { data: profData } = await supabase
+                        .from("profiles")
+                        .select("store_name, full_name")
+                        .eq("id", session.owner_id)
+                        .maybeSingle();
+
+                    if (profData) {
+                        storeName = profData.store_name ?? null;
+                        fullName = profData.full_name ?? null;
+                    }
+                }
+
+                setOwnerProfile({ store_name: storeName, full_name: fullName });
+
             } catch {
                 router.replace("/auth/staff-cashier-worker-login");
             } finally {
@@ -101,7 +120,7 @@ export default function CashierPage() {
     return (
         <DashboardCashier
             staff={staff}
-            ownerStoreName={ownerProfile?.store_name ?? "your store"}
+            ownerStoreName={ownerProfile?.store_name ?? ""}
             ownerFullName={ownerProfile?.full_name ?? ""}
         />
     );

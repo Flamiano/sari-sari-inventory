@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
     FileText, FileSpreadsheet, TrendingUp, DollarSign,
-    ShoppingBag, Receipt, Calendar, ChevronDown,
+    ShoppingBag, Receipt, Calendar,
     RefreshCw, Package, ChefHat, Store, UtensilsCrossed,
     ArrowUpRight, BarChart3, Loader2,
 } from "lucide-react";
@@ -72,7 +72,7 @@ function getDateRange(range: DateRange): { from: string; to: string; label: stri
 
 async function exportPDF(
     transactions: Transaction[], allItems: (TransactionItem & { transaction_id: string })[],
-    storeName: string, staffName: string, staffRole: string, dateLabel: string, rangeLabel: string,
+    storeName: string, ownerName: string, staffName: string, staffRole: string, dateLabel: string, rangeLabel: string,
 ) {
     const { default: jsPDF } = await import("jspdf");
     const autoTable = (await import("jspdf-autotable")).default;
@@ -91,27 +91,23 @@ async function exportPDF(
     };
 
     const drawFrame = () => {
-        doc.setDrawColor(...C.rule); doc.setLineWidth(0.25);
-        doc.rect(8, 8, pw - 16, ph - 16);
+        doc.setDrawColor(...C.rule); doc.setLineWidth(0.25); doc.rect(8, 8, pw - 16, ph - 16);
         doc.setFillColor(...C.accent); doc.rect(8, 8, 3.5, ph - 16, "F");
     };
 
     drawFrame();
     doc.setFillColor(...C.bg); doc.rect(11.5, 8, pw - 19.5, 28, "F");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...C.black);
-    doc.text("SariSari.IMS", 17, 19);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...C.black); doc.text("SariSari.IMS", 17, 19);
     doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...C.mid);
-    doc.text("Inventory Management System", 17, 25);
-    doc.text("Staff Sales Report", 17, 30);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...C.black);
-    doc.text("SALES REPORT", pw - 12, 18, { align: "right" });
+    doc.text("Inventory Management System", 17, 25); doc.text("Staff Sales Report", 17, 30);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...C.black); doc.text("SALES REPORT", pw - 12, 18, { align: "right" });
     doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...C.mid);
     doc.text(`Ref: ${refNo}`, pw - 12, 24, { align: "right" });
     doc.text(`Generated: ${now.toLocaleString("en-PH")}`, pw - 12, 29, { align: "right" });
 
     const metaY = 44;
     const colW = (pw - 26) / 5;
-    [["DATE RANGE", rangeLabel], ["PERIOD", dateLabel], ["STORE", storeName], ["PREPARED BY", staffName], ["ROLE", staffRole.charAt(0).toUpperCase() + staffRole.slice(1)]].forEach(([lbl, val], i) => {
+    [["DATE RANGE", rangeLabel], ["PERIOD", dateLabel], ["STORE", storeName], ["STORE OWNER", ownerName], ["PREPARED BY", `${staffName} (${staffRole})`]].forEach(([lbl, val], i) => {
         const x = 16 + i * colW;
         doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...C.light); doc.text(lbl, x, metaY - 3.5);
         doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(...C.dark); doc.text(val.length > 24 ? val.slice(0, 22) + "…" : val, x, metaY + 2);
@@ -140,7 +136,8 @@ async function exportPDF(
         head: [["#", "Ref", "Date & Time", "Product", "Category", "Qty", "Unit Price", "Subtotal", "Profit", "Staff"]],
         body: allItems.map((item, i) => {
             const txn = transactions.find(t => t.id === item.transaction_id);
-            return [i + 1, txn?.transaction_ref ?? "—", txn ? new Date(txn.created_at).toLocaleString("en-PH", { dateStyle: "short", timeStyle: "short" }) : "—",
+            return [i + 1, txn?.transaction_ref ?? "—",
+            txn ? new Date(txn.created_at).toLocaleString("en-PH", { dateStyle: "short", timeStyle: "short" }) : "—",
             item.product_name, item.category, item.quantity,
             `PHP ${Number(item.unit_price).toFixed(2)}`, `PHP ${Number(item.subtotal).toFixed(2)}`,
             `PHP ${Number(item.profit).toFixed(2)}`, txn?.sold_by_name ?? staffName];
@@ -172,7 +169,7 @@ async function exportPDF(
 
 async function exportExcel(
     transactions: Transaction[], allItems: (TransactionItem & { transaction_id: string })[],
-    storeName: string, staffName: string, staffRole: string, dateLabel: string, rangeLabel: string,
+    storeName: string, ownerName: string, staffName: string, staffRole: string, dateLabel: string, rangeLabel: string,
 ) {
     const XLSXmod = await import("xlsx");
     const XLSX = XLSXmod.default ?? XLSXmod;
@@ -192,16 +189,18 @@ async function exportExcel(
     const aoa: any[][] = [
         ["SariSari.IMS — STAFF SALES REPORT"], [`Reference: ${refNo}`],
         [`Store: ${storeName}`, "", "", `Date Range: ${rangeLabel}`],
-        [`Period: ${dateLabel}`, "", "", `Total Sales: PHP ${totalSales.toFixed(2)}`],
-        [`Prepared by: ${staffName} (${staffRole})`, "", "", `Total Profit: PHP ${totalProfit.toFixed(2)}`],
-        [`Exported: ${now.toLocaleString("en-PH")}`, "", "", `Transactions: ${transactions.length}`],
+        [`Store Owner: ${ownerName}`, "", "", `Period: ${dateLabel}`],
+        [`Prepared by: ${staffName} (${staffRole})`, "", "", `Total Sales: PHP ${totalSales.toFixed(2)}`],
+        [`Exported: ${now.toLocaleString("en-PH")}`, "", "", `Total Profit: PHP ${totalProfit.toFixed(2)}`],
+        ["", "", "", `Transactions: ${transactions.length}`],
         [],
         ["#", "Transaction Ref", "Date", "Time", "Product", "Category", "Qty", "Unit Price (PHP)", "Subtotal (PHP)", "Profit (PHP)", "Staff"],
         ...rows, [],
         ["SUMMARY"], ["Total Sales (PHP)", "", totalSales.toFixed(2)], ["Total Profit (PHP)", "", totalProfit.toFixed(2)],
         ["Total Transactions", "", transactions.length], ["Total Items Sold", "", allItems.reduce((s, i) => s + i.quantity, 0)],
-        [], ["Prepared by:", staffName], ["Role:", staffRole.charAt(0).toUpperCase() + staffRole.slice(1)],
-        ["Store:", storeName], ["Generated:", now.toLocaleString("en-PH")], ["System:", "SariSari.IMS — Inventory Management System"],
+        [], ["Store:", storeName], ["Store Owner:", ownerName],
+        ["Prepared by:", staffName], ["Role:", staffRole.charAt(0).toUpperCase() + staffRole.slice(1)],
+        ["Generated:", now.toLocaleString("en-PH")], ["System:", "SariSari.IMS — Inventory Management System"],
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -212,23 +211,29 @@ async function exportExcel(
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// MAIN: Reports
+// MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 
 interface ReportsProps {
     ownerStoreName?: string;
+    ownerFullName?: string;   // owner's real name — shown as "Store Owner" in exports
 }
 
-export default function Reports({ ownerStoreName }: ReportsProps = {}) {
+export default function Reports({ ownerStoreName, ownerFullName }: ReportsProps = {}) {
+    // ── session from sessionStorage — has the STAFF's data (id, full_name, role, owner_id) ──
+    // NEVER use session.full_name as the store name or owner name
     const [session, setSession] = useState<StaffSession | null>(null);
-    const [storeName, setStoreName] = useState(ownerStoreName ?? "My Store");
     const [range, setRange] = useState<DateRange>("today");
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [allItems, setAllItems] = useState<(TransactionItem & { transaction_id: string })[]>([]);
     const [loading, setLoading] = useState(true);
     const [exporting, setExporting] = useState<"pdf" | "excel" | null>(null);
 
-    // ── Load session from sessionStorage ─────────────────────────
+    // storeName = owner's store, from prop (set from profiles row in page.tsx)
+    // staffName = this staff member's name, from sessionStorage
+    const storeName = ownerStoreName || "My Store";
+    const ownerName = ownerFullName || "—";          // owner's real name for display
+
     useEffect(() => {
         try {
             const raw = sessionStorage.getItem("staff_session");
@@ -236,47 +241,20 @@ export default function Reports({ ownerStoreName }: ReportsProps = {}) {
         } catch { /* ignore */ }
     }, []);
 
-    // ── Update storeName if prop arrives later ────────────────────
-    useEffect(() => {
-        if (ownerStoreName) setStoreName(ownerStoreName);
-    }, [ownerStoreName]);
-
-    // ── Fetch store name via safe RPC if not passed as prop ───────
-    useEffect(() => {
-        if (ownerStoreName || !session?.owner_id) return;
-        supabase
-            .rpc("get_owner_profile", { p_owner_id: session.owner_id })
-            .then(({ data }) => {
-                const profile = data?.[0];
-                if (profile?.store_name) setStoreName(profile.store_name);
-            });
-    }, [session?.owner_id, ownerStoreName]);
-
-    // ── Fetch transactions + items via safe RPCs ──────────────────
     const fetchData = useCallback(async () => {
         if (!session?.owner_id) return;
         setLoading(true);
         try {
             const { from, to } = getDateRange(range);
-
-            // Use SECURITY DEFINER RPC — bypasses RLS
             const { data: txnData, error: txnErr } = await supabase
-                .rpc("get_owner_transactions", {
-                    p_owner_id: session.owner_id,
-                    p_from: from,
-                    p_to: to,
-                });
-
+                .rpc("get_owner_transactions", { p_owner_id: session.owner_id, p_from: from, p_to: to });
             if (txnErr) console.error("Transactions RPC error:", txnErr);
             const txns: Transaction[] = txnData ?? [];
             setTransactions(txns);
-
             if (txns.length > 0) {
-                const ids = txns.map(t => t.id);
                 const { data: itemData, error: itemErr } = await supabase
-                    .rpc("get_transaction_items", { p_transaction_ids: ids });
-
-                if (itemErr) console.error("Transaction items RPC error:", itemErr);
+                    .rpc("get_transaction_items", { p_transaction_ids: txns.map(t => t.id) });
+                if (itemErr) console.error("Items RPC error:", itemErr);
                 setAllItems((itemData ?? []) as (TransactionItem & { transaction_id: string })[]);
             } else {
                 setAllItems([]);
@@ -290,7 +268,6 @@ export default function Reports({ ownerStoreName }: ReportsProps = {}) {
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
-    // ── Computed ──────────────────────────────────────────────────
     const totalSales = transactions.reduce((s, t) => s + Number(t.total_amount), 0);
     const totalProfit = allItems.reduce((s, i) => s + Number(i.profit), 0);
     const totalOrders = transactions.length;
@@ -314,18 +291,18 @@ export default function Reports({ ownerStoreName }: ReportsProps = {}) {
         }, {} as Record<string, { date: string; label: string; sales: number; count: number }>)
     ).map(([, v]) => v).sort((a, b) => a.date.localeCompare(b.date));
 
+    const rangeLabel = range === "today" ? "Today" : range === "week" ? "This Week" : "This Month";
+
     const handleExportPDF = async () => {
         if (!session || !transactions.length) return;
         setExporting("pdf");
-        await exportPDF(transactions, allItems, storeName, session.full_name, session.role,
-            getDateRange(range).label, range === "today" ? "Today" : range === "week" ? "This Week" : "This Month");
+        await exportPDF(transactions, allItems, storeName, ownerName, session.full_name, session.role, getDateRange(range).label, rangeLabel);
         setExporting(null);
     };
     const handleExportExcel = async () => {
         if (!session || !transactions.length) return;
         setExporting("excel");
-        await exportExcel(transactions, allItems, storeName, session.full_name, session.role,
-            getDateRange(range).label, range === "today" ? "Today" : range === "week" ? "This Week" : "This Month");
+        await exportExcel(transactions, allItems, storeName, ownerName, session.full_name, session.role, getDateRange(range).label, rangeLabel);
         setExporting(null);
     };
 
@@ -345,18 +322,15 @@ export default function Reports({ ownerStoreName }: ReportsProps = {}) {
                 <div className="flex items-center gap-2 flex-wrap">
                     <button onClick={fetchData} disabled={loading}
                         className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-[0.78rem] font-bold text-slate-500 hover:text-violet-600 hover:border-violet-200 transition-all disabled:opacity-50">
-                        <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-                        Refresh
+                        <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
                     </button>
                     <button onClick={handleExportExcel} disabled={!transactions.length || !!exporting}
                         className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[0.78rem] font-bold transition-all disabled:opacity-40 active:scale-95">
-                        {exporting === "excel" ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
-                        Excel
+                        {exporting === "excel" ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />} Excel
                     </button>
                     <button onClick={handleExportPDF} disabled={!transactions.length || !!exporting}
                         className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[0.78rem] font-bold transition-all disabled:opacity-40 active:scale-95">
-                        {exporting === "pdf" ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
-                        PDF
+                        {exporting === "pdf" ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />} PDF
                     </button>
                 </div>
             </div>
@@ -372,12 +346,31 @@ export default function Reports({ ownerStoreName }: ReportsProps = {}) {
                 ))}
             </div>
 
-            {/* Period label */}
-            <div className="flex items-center gap-2 text-[0.75rem] text-slate-500">
-                <Calendar size={12} className="text-violet-400" />
-                <span className="font-bold">{dateLabel}</span>
-                <span className="text-slate-300">·</span>
-                <span>{session?.full_name} ({session?.role})</span>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.75rem] text-slate-500">
+                <div className="flex items-center gap-1.5">
+                    <Calendar size={12} className="text-violet-400" />
+                    <span className="font-bold">{dateLabel}</span>
+                </div>
+                <span className="text-slate-200">·</span>
+                <span>
+                    <span className="text-slate-400">Staff: </span>
+                    <span className="font-bold text-slate-700">{session?.full_name ?? "—"}</span>
+                    <span className="text-slate-400"> ({session?.role})</span>
+                </span>
+                <span className="text-slate-200">·</span>
+                <span>
+                    <span className="text-slate-400">Store: </span>
+                    <span className="font-bold text-slate-700">{storeName}</span>
+                </span>
+                {ownerName !== "—" && (
+                    <>
+                        <span className="text-slate-200">·</span>
+                        <span>
+                            <span className="text-slate-400">Owner: </span>
+                            <span className="font-bold text-slate-700">{ownerName}</span>
+                        </span>
+                    </>
+                )}
             </div>
 
             {/* Stat cards */}
@@ -493,13 +486,13 @@ export default function Reports({ ownerStoreName }: ReportsProps = {}) {
                             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Transaction</p>
                             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest w-12 text-center">Items</p>
                             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Total</p>
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest w-24 text-right">Seller</p>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest w-28 text-right">Seller</p>
                         </div>
                         <div className="divide-y divide-slate-50">
                             {transactions.map((txn, i) => {
                                 const d = new Date(txn.created_at);
                                 return (
-                                    <div key={txn.id} className="grid grid-cols-[auto_1fr_auto_auto] sm:grid-cols-[auto_1fr_auto_auto_auto] gap-4 items-center px-5 py-3.5 hover:bg-slate-50 transition-colors">
+                                    <div key={txn.id} className="grid grid-cols-[auto_1fr_auto_auto] sm:grid-cols-[auto_1fr_auto_auto_auto] gap-4 items-start px-5 py-3.5 hover:bg-slate-50 transition-colors">
                                         <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-100 flex items-center justify-center shrink-0">
                                             <span className="text-[9px] font-black text-violet-500">#{i + 1}</span>
                                         </div>
@@ -510,17 +503,23 @@ export default function Reports({ ownerStoreName }: ReportsProps = {}) {
                                             </p>
                                         </div>
                                         <div className="text-center w-12 shrink-0">
-                                            <span className="inline-flex items-center justify-center w-7 h-7 bg-slate-100 rounded-lg text-xs font-black text-slate-600">
-                                                {txn.item_count}
-                                            </span>
+                                            <span className="inline-flex items-center justify-center w-7 h-7 bg-slate-100 rounded-lg text-xs font-black text-slate-600">{txn.item_count}</span>
                                         </div>
                                         <div className="text-right shrink-0">
                                             <p className="text-sm font-black text-slate-900">{php(txn.total_amount)}</p>
                                         </div>
-                                        <div className="hidden sm:block text-right shrink-0 w-24">
-                                            <p className="text-[10px] font-bold text-slate-500 truncate">
-                                                {txn.sold_by_name ?? session?.full_name ?? "—"}
-                                            </p>
+                                        <div className="hidden sm:block text-right shrink-0 w-28">
+                                            {txn.sold_by_name ? (
+                                                <div className="flex flex-col items-end gap-0.5">
+                                                    <p className="text-[10px] font-bold text-slate-700 truncate">{txn.sold_by_name}</p>
+                                                    <span className="text-[8px] font-black uppercase tracking-wide text-cyan-600 bg-cyan-50 border border-cyan-100 px-1.5 py-0.5 rounded-full">Cashier</span>
+                                                </div>
+                                            ) : (
+                                                <div className="flex flex-col items-end gap-0.5">
+                                                    <p className="text-[10px] font-bold text-slate-500">{ownerName !== "—" ? ownerName : "Owner"}</p>
+                                                    <span className="text-[8px] font-black uppercase tracking-wide text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-full">Owner</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 );

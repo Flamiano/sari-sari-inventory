@@ -11,9 +11,9 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/app/utils/supabase";
 import toast, { Toaster } from "react-hot-toast";
-import { logStaffAction } from "../staff-worker/DashboardStaff";
+import SignOutModal from "@/app/comps/signoutmodal/page";
 
-// ─── Types ────────────────────────────────────────────────────────
+// Types
 interface StaffData {
     id: string; full_name: string; email: string;
     role: string; status: string; owner_id: string; avatar_url: string | null;
@@ -42,15 +42,19 @@ interface TxItem {
 }
 type DatePreset = "today" | "week" | "month" | "custom";
 
-// ─── Helpers ──────────────────────────────────────────────────────
+// Utility: generate a unique transaction reference
 function generateRef() {
     const n = new Date();
     return `TXN-${String(n.getFullYear()).slice(-2)}${String(n.getMonth() + 1).padStart(2, "0")}${String(n.getDate()).padStart(2, "0")}-${Math.floor(Math.random() * 9000) + 1000}`;
 }
+
+// Utility: format seconds as Xh Ym
 function formatTime(s: number) {
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
+
+// Utility: human-readable relative time
 function timeAgo(d: string) {
     const s = (Date.now() - new Date(d).getTime()) / 1000;
     if (s < 60) return "just now";
@@ -58,22 +62,26 @@ function timeAgo(d: string) {
     if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
     return new Date(d).toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 }
+
+// Utility: full peso format with centavos
 const php = (n: number) =>
     `₱${Number(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// Compact: ₱1.7K / ₱2.3M — used in stat cards to prevent overflow
+// Utility: compact peso format for stat cards (prevents overflow)
 function phpShort(n: number): string {
     if (n >= 1_000_000) return `₱${(n / 1_000_000).toFixed(1)}M`;
     if (n >= 1_000) return `₱${(n / 1_000).toFixed(1)}K`;
     return `₱${n.toFixed(2)}`;
 }
-// Compact integer (items, orders)
+
+// Utility: compact integer format
 function numShort(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
     return String(n);
 }
 
+// Utility: compute ISO date bounds for a given preset
 function getDateBounds(preset: DatePreset, cFrom?: string, cTo?: string) {
     const now = new Date();
     const today = now.toISOString().split("T")[0];
@@ -108,6 +116,7 @@ function getDateBounds(preset: DatePreset, cFrom?: string, cTo?: string) {
     }
 }
 
+// Category color map for product cards and icons
 const CAT_COLORS: Record<string, { bg: string; color: string }> = {
     food: { bg: "rgba(234,179,8,.08)", color: "#ca8a04" },
     beverages: { bg: "rgba(8,145,178,.08)", color: "#0891b2" },
@@ -125,7 +134,7 @@ function cs(cat: string) {
     return CAT_COLORS[k] ?? CAT_COLORS[cat.toLowerCase()] ?? CAT_COLORS.default;
 }
 
-// ─── Logo ─────────────────────────────────────────────────────────
+// Logo component with image fallback
 function Logo({ size = 32 }: { size?: number }) {
     const [err, setErr] = useState(false);
     if (err) {
@@ -143,19 +152,22 @@ function Logo({ size = 32 }: { size?: number }) {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ═════════════════════════════════════════════════════════════════
+// Main dashboard component
 export default function DashboardCashier({
-    staff, ownerStoreName = "your store", ownerFullName = "",
+    staff, ownerStoreName = "", ownerFullName = "",
 }: { staff: StaffData; ownerStoreName?: string; ownerFullName?: string }) {
     const router = useRouter();
 
+    const displayStoreName = ownerStoreName || "Your Store";
+    const displayOwnerName = ownerFullName || "—";
+
+    // Product state
     const [products, setProducts] = useState<Product[]>([]);
     const [prodLoad, setProdLoad] = useState(true);
     const [search, setSearch] = useState("");
     const [activeCat, setActiveCat] = useState("all");
 
+    // Cart state
     const [cart, setCart] = useState<CartItem[]>([]);
     const [payMethod, setPayMethod] = useState<"cash" | "card">("cash");
     const [tendered, setTendered] = useState("");
@@ -164,6 +176,7 @@ export default function DashboardCashier({
     const [lastChange, setLastCh] = useState(0);
     const [lastTotal, setLastTot] = useState(0);
 
+    // Sales history state (cashier-only — filtered by this staff member's id)
     const [transactions, setTxns] = useState<Transaction[]>([]);
     const [txItems, setTxItems] = useState<Record<string, TxItem[]>>({});
     const [txLoad, setTxLoad] = useState(true);
@@ -173,6 +186,10 @@ export default function DashboardCashier({
     const [showCustom, setShowCustom] = useState(false);
     const [expandedTx, setExpandedTx] = useState<string | null>(null);
 
+    // Sign-out modal state
+    const [signOutOpen, setSignOutOpen] = useState(false);
+
+    // Shift timer
     const shiftStart = useRef(Date.now());
     const [shiftSec, setShiftSec] = useState(0);
     useEffect(() => {
@@ -180,11 +197,11 @@ export default function DashboardCashier({
         return () => clearInterval(t);
     }, []);
 
+    // Navigation state
     const [mob, setMob] = useState<"pos" | "cart" | "sales">("pos");
     const [desk, setDesk] = useState<"pos" | "sales">("pos");
-    const [confirmOut, setConfirmOut] = useState(false);
 
-    // ── Fetch products ─────────────────────────────────────────
+    // Fetch all products for this owner (products + prepared meals)
     const fetchProducts = useCallback(async () => {
         setProdLoad(true);
         try {
@@ -193,25 +210,49 @@ export default function DashboardCashier({
                 supabase.rpc("get_owner_meals", { p_owner_id: staff.owner_id }),
             ]);
             setProducts([
-                ...((p ?? []) as any[]).map((x: any) => ({ id: x.id, name: x.name, image_url: x.image_url, price: +x.price, market_price: +x.market_price, stock_quantity: x.stock_quantity, category: x.category, subcategory: x.subcategory ?? null, source: "products" as const })),
-                ...((m ?? []) as any[]).map((x: any) => ({ id: x.id, name: x.name, image_url: x.image_url, price: +x.price, market_price: +x.market_price, stock_quantity: x.stock_quantity, category: "Prepared Meal", subcategory: null, source: "prepared_meals" as const })),
+                ...((p ?? []) as any[]).map((x: any) => ({
+                    id: x.id, name: x.name, image_url: x.image_url,
+                    price: +x.price, market_price: +x.market_price,
+                    stock_quantity: x.stock_quantity, category: x.category,
+                    subcategory: x.subcategory ?? null, source: "products" as const,
+                })),
+                ...((m ?? []) as any[]).map((x: any) => ({
+                    id: x.id, name: x.name, image_url: x.image_url,
+                    price: +x.price, market_price: +x.market_price,
+                    stock_quantity: x.stock_quantity, category: "Prepared Meal",
+                    subcategory: null, source: "prepared_meals" as const,
+                })),
             ]);
-        } catch { toast.error("Failed to load products."); }
-        finally { setProdLoad(false); }
+        } catch {
+            toast.error("Failed to load products.");
+        } finally {
+            setProdLoad(false);
+        }
     }, [staff.owner_id]);
 
-    // ── Fetch sales ────────────────────────────────────────────
+    // Fetch sales history — filtered to THIS cashier only using sold_by_staff_id
     const fetchSales = useCallback(async (preset: DatePreset, cFrom?: string, cTo?: string) => {
         setTxLoad(true);
         try {
             const bounds = getDateBounds(preset, cFrom, cTo);
+
+            // Use the SECURITY DEFINER RPC to get transactions, then filter
+            // client-side to only show this cashier's own sales.
             const { data } = await supabase.rpc("get_owner_transactions", {
-                p_owner_id: staff.owner_id, p_from: bounds.from, p_to: bounds.to,
+                p_owner_id: staff.owner_id,
+                p_from: bounds.from,
+                p_to: bounds.to,
             });
-            const list = (data ?? []) as Transaction[];
-            setTxns(list);
-            if (list.length > 0) {
-                const { data: itemData } = await supabase.rpc("get_transaction_items", { p_transaction_ids: list.map(t => t.id) });
+
+            // Filter: only include transactions where this cashier processed the sale
+            const all = (data ?? []) as Transaction[];
+            const mine = all.filter(t => t.sold_by_staff_id === staff.id);
+            setTxns(mine);
+
+            if (mine.length > 0) {
+                const { data: itemData } = await supabase
+                    .rpc("get_transaction_items", { p_transaction_ids: mine.map(t => t.id) });
+
                 if (itemData) {
                     const grouped: Record<string, TxItem[]> = {};
                     (itemData as TxItem[]).forEach(i => {
@@ -220,10 +261,15 @@ export default function DashboardCashier({
                     });
                     setTxItems(grouped);
                 }
-            } else { setTxItems({}); }
-        } catch { /* silent */ }
-        finally { setTxLoad(false); }
-    }, [staff.owner_id]);
+            } else {
+                setTxItems({});
+            }
+        } catch {
+            // Silent — cashier not finding their own sales is non-critical
+        } finally {
+            setTxLoad(false);
+        }
+    }, [staff.owner_id, staff.id]);
 
     useEffect(() => { fetchProducts(); fetchSales("today"); }, [fetchProducts, fetchSales]);
 
@@ -233,7 +279,7 @@ export default function DashboardCashier({
         if (p !== "custom") fetchSales(p);
     };
 
-    // ── Cart ──────────────────────────────────────────────────
+    // Cart helpers using a composite key to avoid id collisions between products and meals
     const cKey = (p: Product) => `${p.source}-${p.id}`;
 
     const addToCart = (p: Product) => {
@@ -241,10 +287,7 @@ export default function DashboardCashier({
         setCart(prev => {
             const ex = prev.find(c => cKey(c) === cKey(p));
             if (ex) {
-                if (ex.qty >= p.stock_quantity) {
-                    toast.error(`Maximum stock reached (${p.stock_quantity}).`);
-                    return prev;
-                }
+                if (ex.qty >= p.stock_quantity) { toast.error(`Maximum stock reached (${p.stock_quantity}).`); return prev; }
                 return prev.map(c => cKey(c) === cKey(p) ? { ...c, qty: c.qty + 1 } : c);
             }
             return [...prev, { ...p, qty: 1 }];
@@ -254,33 +297,34 @@ export default function DashboardCashier({
     const updQty = (key: string, d: number) => {
         setCart(prev => prev.map(c => {
             if (cKey(c) !== key) return c;
-            if (d > 0 && c.qty >= c.stock_quantity) {
-                toast.error(`Maximum stock reached (${c.stock_quantity}).`);
-                return c;
-            }
+            if (d > 0 && c.qty >= c.stock_quantity) { toast.error(`Maximum stock reached (${c.stock_quantity}).`); return c; }
             return { ...c, qty: Math.max(0, c.qty + d) };
         }).filter(c => c.qty > 0));
     };
 
     const clearCart = () => { setCart([]); setTendered(""); };
 
+    // Computed cart totals
     const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
     const cartCount = cart.reduce((s, i) => s + i.qty, 0);
     const tenderedAmt = parseFloat(tendered) || 0;
     const change = tenderedAmt - cartTotal;
+
+    // Product filtering
     const categories = ["all", ...Array.from(new Set(products.map(p => p.category)))];
     const filtered = products.filter(p =>
         (activeCat === "all" || p.category === activeCat) &&
         p.name.toLowerCase().includes(search.toLowerCase())
     );
 
+    // Sales summary (computed from cashier-only transactions)
     const totalSales = transactions.reduce((s, t) => s + Number(t.total_amount), 0);
     const totalOrders = transactions.length;
     const totalItems = transactions.reduce((s, t) => s + t.item_count, 0);
     const avgOrder = totalOrders > 0 ? totalSales / totalOrders : 0;
     const productById = products.reduce((acc, p) => { acc[p.id] = p; return acc; }, {} as Record<string, Product>);
 
-    // ── Checkout ──────────────────────────────────────────────
+    // Process checkout via SECURITY DEFINER RPC (bypasses RLS for stock deduction)
     const checkout = async () => {
         if (!cart.length) { toast.error("Cart is empty."); return; }
         if (payMethod === "cash" && !tendered) { toast.error("Enter cash tendered."); return; }
@@ -291,42 +335,65 @@ export default function DashboardCashier({
             const paid = payMethod === "cash" ? tenderedAmt : cartTotal;
             const chng = payMethod === "cash" ? Math.max(0, change) : 0;
             const items = cart.map(i => ({
-                product_id: i.id, product_source: i.source, product_name: i.name,
-                category: i.category, subcategory: i.subcategory ?? null,
-                quantity: i.qty, unit_price: i.price, unit_cost: i.market_price,
-                subtotal: i.price * i.qty, profit: (i.price - i.market_price) * i.qty,
+                product_id: i.id,
+                product_source: i.source,
+                product_name: i.name,
+                category: i.category,
+                subcategory: i.subcategory ?? null,
+                quantity: i.qty,
+                unit_price: i.price,
+                unit_cost: i.market_price,
+                subtotal: i.price * i.qty,
+                profit: (i.price - i.market_price) * i.qty,
                 stock_quantity: i.stock_quantity,
             }));
             const { error } = await supabase.rpc("staff_process_sale", {
-                p_owner_id: staff.owner_id, p_staff_id: staff.id, p_staff_name: staff.full_name,
-                p_transaction_ref: ref, p_total_amount: cartTotal,
-                p_amount_paid: paid, p_change_amount: chng,
-                p_item_count: cartCount, p_items: items,
+                p_owner_id: staff.owner_id,
+                p_staff_id: staff.id,
+                p_staff_name: staff.full_name,
+                p_transaction_ref: ref,
+                p_total_amount: cartTotal,
+                p_amount_paid: paid,
+                p_change_amount: chng,
+                p_item_count: cartCount,
+                p_items: items,
             });
             if (error) throw error;
-            setLastCh(chng); setLastTot(cartTotal);
+            setLastCh(chng);
+            setLastTot(cartTotal);
             fetchProducts();
             fetchSales(salesPreset, customFrom, customTo);
-            setProc(false); setSuccess(true);
+            setProc(false);
+            setSuccess(true);
             setTimeout(() => { setSuccess(false); clearCart(); setMob("pos"); }, 2600);
-        } catch (e: any) { setProc(false); toast.error(e?.message ?? "Checkout failed."); }
+        } catch (e: any) {
+            setProc(false);
+            toast.error(e?.message ?? "Checkout failed.");
+        }
     };
 
-    const signOut = () => { sessionStorage.removeItem("staff_session"); router.replace("/auth/staff-cashier-worker-login"); };
+    // Sign out — clears session and redirects to the staff/cashier login
+    const handleSignOut = async () => {
+        sessionStorage.removeItem("staff_session");
+        sessionStorage.removeItem("staff_active_nav");
+        router.replace("/auth/staff-cashier-worker-login");
+    };
+
     const initials = staff.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
     const bounds = getDateBounds(salesPreset, customFrom, customTo);
 
     return (
         <>
             <Toaster position="top-center" toastOptions={{
-                style: { fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 600, fontSize: "0.875rem", borderRadius: "12px", border: "1px solid #e2e8f0" }
+                style: {
+                    fontFamily: "'Plus Jakarta Sans',sans-serif",
+                    fontWeight: 600,
+                    fontSize: "0.875rem",
+                    borderRadius: "12px",
+                    border: "1px solid #e2e8f0",
+                },
             }} />
 
-            {/*
-             * Font pairing — mirrors DashboardStaff exactly:
-             *   body/ui  → Plus Jakarta Sans (same weights)
-             *   headings/display numbers → Syne (700-900)
-             */}
             <style>{`
                 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Syne:wght@700;800;900&display=swap');
                 *, *::before, *::after { font-family:'Plus Jakarta Sans',sans-serif; box-sizing:border-box; }
@@ -337,13 +404,21 @@ export default function DashboardCashier({
                 .no-scroll { -ms-overflow-style:none; scrollbar-width:none; }
                 .no-scroll::-webkit-scrollbar { display:none; }
                 @supports (padding-bottom: env(safe-area-inset-bottom)) {
-                    .safe-pad  { padding-bottom: env(safe-area-inset-bottom); }
+                    .safe-pad    { padding-bottom: env(safe-area-inset-bottom); }
                     .content-safe { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
                 }
                 @media (max-width:1023px) { html,body { height:100%; overscroll-behavior:none; } }
             `}</style>
 
-            {/* ── Sale complete overlay ─────────────────────── */}
+            {/* Sign-out confirmation modal */}
+            <SignOutModal
+                isOpen={signOutOpen}
+                storeName={displayStoreName}
+                onConfirm={handleSignOut}
+                onCancel={() => setSignOutOpen(false)}
+            />
+
+            {/* Sale complete overlay */}
             <AnimatePresence>
                 {showSuccess && (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -378,36 +453,9 @@ export default function DashboardCashier({
                 )}
             </AnimatePresence>
 
-            {/* ── Sign-out confirm ──────────────────────────── */}
-            <AnimatePresence>
-                {confirmOut && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-                        style={{ background: "rgba(0,0,0,.4)", backdropFilter: "blur(4px)" }}
-                        onClick={() => setConfirmOut(false)}>
-                        <motion.div initial={{ scale: .92 }} animate={{ scale: 1 }} exit={{ scale: .92 }}
-                            className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl"
-                            onClick={e => e.stopPropagation()}>
-                            <h3 className="font-black text-slate-900 text-base syne mb-1">Sign Out?</h3>
-                            <p className="text-sm text-slate-400 mb-5">Your session will end. You'll need to log in again.</p>
-                            <div className="flex gap-2">
-                                <button onClick={() => setConfirmOut(false)}
-                                    className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all">
-                                    Cancel
-                                </button>
-                                <button onClick={signOut}
-                                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-all">
-                                    Sign Out
-                                </button>
-                            </div>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
             <div className="min-h-screen flex flex-col" style={{ background: "#F0F4F8" }}>
 
-                {/* ══════ HEADER ══════ */}
+                {/* Header */}
                 <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
                     <div className="px-3 sm:px-6">
                         <div className="flex items-center justify-between gap-3 h-14">
@@ -425,11 +473,11 @@ export default function DashboardCashier({
                                 </div>
                             </div>
 
-                            {/* Desktop nav tabs */}
+                            {/* Desktop navigation tabs */}
                             <nav className="hidden md:flex items-center gap-1">
                                 {([
                                     { id: "pos", label: "Point of Sale", icon: <Grid3x3 size={16} /> },
-                                    { id: "sales", label: "Sales Report", icon: <BarChart3 size={16} /> },
+                                    { id: "sales", label: "My Sales", icon: <BarChart3 size={16} /> },
                                 ] as const).map(t => (
                                     <button key={t.id} onClick={() => setDesk(t.id)}
                                         className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[0.82rem] font-semibold transition-all"
@@ -442,7 +490,7 @@ export default function DashboardCashier({
                                 ))}
                             </nav>
 
-                            {/* Right: avatar + sign out */}
+                            {/* Avatar chip and sign-out */}
                             <div className="flex items-center gap-2 flex-shrink-0">
                                 <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200">
                                     <div className="w-6 h-6 rounded-lg flex items-center justify-center font-black text-white text-[0.6rem] flex-shrink-0 syne"
@@ -454,7 +502,7 @@ export default function DashboardCashier({
                                         <p className="text-[0.6rem] text-slate-400 capitalize mt-0.5">{staff.role}</p>
                                     </div>
                                 </div>
-                                <button onClick={() => setConfirmOut(true)}
+                                <button onClick={() => setSignOutOpen(true)}
                                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[0.78rem] font-bold text-slate-500 hover:text-red-500 hover:bg-red-50 border border-slate-200 hover:border-red-100 transition-all">
                                     <LogOut size={13} /><span className="hidden sm:block">Sign Out</span>
                                 </button>
@@ -462,11 +510,11 @@ export default function DashboardCashier({
                         </div>
                     </div>
 
-                    {/* Metrics strip */}
+                    {/* Metrics strip — shows this cashier's own totals */}
                     <div className="border-t border-slate-100 px-3 sm:px-6 py-2 grid grid-cols-3 divide-x divide-slate-100 bg-slate-50/60">
                         {[
-                            { label: "Today's Sales", val: txLoad ? "—" : php(totalSales), color: "#0891b2" },
-                            { label: "Transactions", val: txLoad ? "—" : String(totalOrders), color: "#7c3aed" },
+                            { label: "My Sales Today", val: txLoad ? "—" : php(totalSales), color: "#0891b2" },
+                            { label: "My Orders", val: txLoad ? "—" : String(totalOrders), color: "#7c3aed" },
                             { label: "Shift Time", val: formatTime(shiftSec), color: "#059669" },
                         ].map(s => (
                             <div key={s.label} className="text-center px-2">
@@ -477,7 +525,7 @@ export default function DashboardCashier({
                     </div>
                 </header>
 
-                {/* ══════ MOBILE (< lg) ══════ */}
+                {/* Mobile layout (below lg breakpoint) */}
                 <div className="lg:hidden flex-1 flex flex-col overflow-hidden content-safe">
                     <AnimatePresence mode="wait">
                         {mob === "pos" && (
@@ -503,6 +551,7 @@ export default function DashboardCashier({
                             <motion.div key="ms" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: .15 }}
                                 className="flex-1 overflow-y-auto">
                                 <SalesPanel
+                                    staffName={staff.full_name}
                                     transactions={transactions} txItems={txItems} txLoad={txLoad}
                                     totalSales={totalSales} totalOrders={totalOrders} totalItems={totalItems} avgOrder={avgOrder}
                                     salesPreset={salesPreset} onPreset={handlePresetChange}
@@ -515,13 +564,13 @@ export default function DashboardCashier({
                         )}
                     </AnimatePresence>
 
-                    {/* Bottom nav */}
+                    {/* Mobile bottom navigation */}
                     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-20 safe-pad">
                         <div className="grid grid-cols-3" style={{ height: "56px" }}>
                             {([
                                 { id: "pos", label: "Products", Icon: Grid3x3 },
                                 { id: "cart", label: "Cart", Icon: ShoppingCart },
-                                { id: "sales", label: "Sales", Icon: BarChart3 },
+                                { id: "sales", label: "My Sales", Icon: BarChart3 },
                             ] as const).map(({ id, label, Icon }) => {
                                 const active = mob === id;
                                 return (
@@ -550,7 +599,7 @@ export default function DashboardCashier({
                     </nav>
                 </div>
 
-                {/* ══════ DESKTOP (≥ lg) ══════ */}
+                {/* Desktop layout (lg and above) */}
                 <div className="hidden lg:flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 96px)" }}>
                     <div className="flex-1 flex flex-col overflow-hidden p-4 sm:p-6 gap-3">
                         <AnimatePresence mode="wait">
@@ -563,6 +612,7 @@ export default function DashboardCashier({
                             ) : (
                                 <motion.div key="ds" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 overflow-y-auto">
                                     <SalesPanel
+                                        staffName={staff.full_name}
                                         transactions={transactions} txItems={txItems} txLoad={txLoad}
                                         totalSales={totalSales} totalOrders={totalOrders} totalItems={totalItems} avgOrder={avgOrder}
                                         salesPreset={salesPreset} onPreset={handlePresetChange}
@@ -589,9 +639,7 @@ export default function DashboardCashier({
     );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// POSPanel
-// ═════════════════════════════════════════════════════════════════
+// Product grid panel — shared between mobile and desktop
 function POSPanel({ products, loading, search, setSearch, cats, activeCat, setActiveCat, cart, cKey, addToCart, mobile }: {
     products: Product[]; loading: boolean; search: string; setSearch: (v: string) => void;
     cats: string[]; activeCat: string; setActiveCat: (v: string) => void;
@@ -608,11 +656,16 @@ function POSPanel({ products, loading, search, setSearch, cats, activeCat, setAc
 
             <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scroll flex-shrink-0">
                 {cats.map(cat => {
-                    const active = activeCat === cat; const c = cs(cat);
+                    const active = activeCat === cat;
+                    const c = cs(cat);
                     return (
                         <button key={cat} onClick={() => setActiveCat(cat)}
                             className="flex-shrink-0 px-2.5 sm:px-3 py-1.5 rounded-xl text-[0.75rem] font-semibold transition-all capitalize whitespace-nowrap"
-                            style={{ background: active ? c.bg : "white", color: active ? c.color : "#64748b", border: active ? `1.5px solid ${c.color}33` : "1.5px solid #e2e8f0" }}>
+                            style={{
+                                background: active ? c.bg : "white",
+                                color: active ? c.color : "#64748b",
+                                border: active ? `1.5px solid ${c.color}33` : "1.5px solid #e2e8f0",
+                            }}>
                             {cat === "all" ? "All Items" : cat}
                         </button>
                     );
@@ -640,7 +693,11 @@ function POSPanel({ products, loading, search, setSearch, cats, activeCat, setAc
                             return (
                                 <motion.button key={cKey(p)} whileTap={{ scale: oos ? 1 : .94 }} onClick={() => addToCart(p)} disabled={oos}
                                     className="bg-white rounded-2xl border text-left transition-all relative overflow-hidden flex flex-col"
-                                    style={{ borderColor: qty > 0 ? "#0891b2" : "#f1f5f9", opacity: oos ? .5 : 1, boxShadow: qty > 0 ? "0 0 0 2px rgba(8,145,178,.12)" : "0 1px 3px rgba(0,0,0,.04)" }}>
+                                    style={{
+                                        borderColor: qty > 0 ? "#0891b2" : "#f1f5f9",
+                                        opacity: oos ? .5 : 1,
+                                        boxShadow: qty > 0 ? "0 0 0 2px rgba(8,145,178,.12)" : "0 1px 3px rgba(0,0,0,.04)",
+                                    }}>
                                     {qty > 0 && (
                                         <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-white text-[0.6rem] font-black z-10 syne"
                                             style={{ background: atMax ? "#ef4444" : "#0891b2" }}>
@@ -676,9 +733,7 @@ function POSPanel({ products, loading, search, setSearch, cats, activeCat, setAc
     );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// CartPanel
-// ═════════════════════════════════════════════════════════════════
+// Cart and checkout panel
 function CartPanel({ cart, cartTotal, cartCount, payMethod, setPayMethod, tendered, setTendered, change, tenderedAmt, processing, clearCart, checkout, updQty, cKey }: {
     cart: CartItem[]; cartTotal: number; cartCount: number;
     payMethod: "cash" | "card"; setPayMethod: (v: "cash" | "card") => void;
@@ -712,7 +767,8 @@ function CartPanel({ cart, cartTotal, cartCount, payMethod, setPayMethod, tender
                             <p className="text-slate-200 text-xs">Tap a product to add it</p>
                         </motion.div>
                     ) : cart.map(item => {
-                        const k = cKey(item); const c = cs(item.category);
+                        const k = cKey(item);
+                        const c = cs(item.category);
                         const atMax = item.qty >= item.stock_quantity;
                         return (
                             <motion.div key={k} initial={{ opacity: 0, x: 14 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -14 }}
@@ -752,7 +808,10 @@ function CartPanel({ cart, cartTotal, cartCount, payMethod, setPayMethod, tender
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                    {([{ id: "cash", label: "Cash", icon: <Banknote size={13} /> }, { id: "card", label: "Card", icon: <CreditCard size={13} /> }] as const).map(pm => (
+                    {([
+                        { id: "cash", label: "Cash", icon: <Banknote size={13} /> },
+                        { id: "card", label: "Card", icon: <CreditCard size={13} /> },
+                    ] as const).map(pm => (
                         <button key={pm.id} onClick={() => setPayMethod(pm.id)}
                             className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-[0.8rem] transition-all"
                             style={{
@@ -770,7 +829,9 @@ function CartPanel({ cart, cartTotal, cartCount, payMethod, setPayMethod, tender
                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden space-y-1.5">
                             <input type="number" inputMode="decimal" placeholder="Cash tendered (₱)" value={tendered} onChange={e => setTendered(e.target.value)}
                                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 outline-none text-[0.87rem] font-bold text-slate-800 focus:border-cyan-400 transition-all" />
-                            {tendered && tenderedAmt >= cartTotal && cartTotal > 0 && <div className="text-[0.73rem] text-emerald-600 font-bold text-right">Change: {php(change)}</div>}
+                            {tendered && tenderedAmt >= cartTotal && cartTotal > 0 && (
+                                <div className="text-[0.73rem] text-emerald-600 font-bold text-right">Change: {php(change)}</div>
+                            )}
                             {tendered && tenderedAmt < cartTotal && cartTotal > 0 && (
                                 <div className="text-[0.73rem] text-red-500 font-bold text-right flex items-center justify-end gap-1">
                                     <AlertTriangle size={9} />Short by {php(cartTotal - tenderedAmt)}
@@ -782,17 +843,20 @@ function CartPanel({ cart, cartTotal, cartCount, payMethod, setPayMethod, tender
 
                 {payMethod === "cash" && cartTotal > 0 && (
                     <div className="flex gap-1.5 overflow-x-auto no-scroll">
-                        {[cartTotal, 20, 50, 100, 200, 500, 1000].filter((v, i, a) => v >= cartTotal && a.indexOf(v) === i).slice(0, 4).map(v => (
-                            <button key={v} onClick={() => setTendered(String(v))}
-                                className="flex-shrink-0 px-2.5 py-1.5 rounded-lg border text-[0.72rem] font-bold transition-all"
-                                style={{
-                                    background: parseFloat(tendered) === v ? "#0891b2" : "white",
-                                    color: parseFloat(tendered) === v ? "white" : "#64748b",
-                                    borderColor: parseFloat(tendered) === v ? "#0891b2" : "#e2e8f0",
-                                }}>
-                                {v === cartTotal ? "Exact" : `₱${v}`}
-                            </button>
-                        ))}
+                        {[cartTotal, 20, 50, 100, 200, 500, 1000]
+                            .filter((v, i, a) => v >= cartTotal && a.indexOf(v) === i)
+                            .slice(0, 4)
+                            .map(v => (
+                                <button key={v} onClick={() => setTendered(String(v))}
+                                    className="flex-shrink-0 px-2.5 py-1.5 rounded-lg border text-[0.72rem] font-bold transition-all"
+                                    style={{
+                                        background: parseFloat(tendered) === v ? "#0891b2" : "white",
+                                        color: parseFloat(tendered) === v ? "white" : "#64748b",
+                                        borderColor: parseFloat(tendered) === v ? "#0891b2" : "#e2e8f0",
+                                    }}>
+                                    {v === cartTotal ? "Exact" : `₱${v}`}
+                                </button>
+                            ))}
                     </div>
                 )}
 
@@ -800,18 +864,23 @@ function CartPanel({ cart, cartTotal, cartCount, payMethod, setPayMethod, tender
                     disabled={processing || cart.length === 0 || (payMethod === "cash" && tendered !== "" && tenderedAmt < cartTotal)}
                     className="w-full relative overflow-hidden flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed syne text-[0.95rem]"
                     style={{ background: "linear-gradient(135deg,#0891b2,#0e7490)", boxShadow: "0 8px 24px rgba(8,145,178,.35)" }}>
-                    {processing && <span className="absolute inset-0 pointer-events-none" style={{ background: "linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent)", animation: "shimmer 1.5s ease-in-out infinite" }} />}
-                    {processing ? <><Loader2 size={17} className="animate-spin" />Processing…</> : <><CheckCircle2 size={17} />Charge {php(cartTotal)}</>}
+                    {processing && (
+                        <span className="absolute inset-0 pointer-events-none"
+                            style={{ background: "linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent)", animation: "shimmer 1.5s ease-in-out infinite" }} />
+                    )}
+                    {processing
+                        ? <><Loader2 size={17} className="animate-spin" />Processing…</>
+                        : <><CheckCircle2 size={17} />Charge {php(cartTotal)}</>
+                    }
                 </button>
             </div>
         </>
     );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// SalesPanel — mobile-first redesign
-// ═════════════════════════════════════════════════════════════════
-function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, totalItems, avgOrder, salesPreset, onPreset, customFrom, setCustomFrom, customTo, setCustomTo, showCustom, onApplyCustom, expandedTx, setExpandedTx, bounds, productById }: {
+// Sales history panel — shows only this cashier's own transactions
+function SalesPanel({ staffName, transactions, txItems, txLoad, totalSales, totalOrders, totalItems, avgOrder, salesPreset, onPreset, customFrom, setCustomFrom, customTo, setCustomTo, showCustom, onApplyCustom, expandedTx, setExpandedTx, bounds, productById }: {
+    staffName: string;
     transactions: Transaction[]; txItems: Record<string, TxItem[]>; txLoad: boolean;
     totalSales: number; totalOrders: number; totalItems: number; avgOrder: number;
     salesPreset: DatePreset; onPreset: (p: DatePreset) => void;
@@ -825,28 +894,25 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
     return (
         <div className="space-y-4 pb-4">
 
-            {/* ── Hero total banner ── */}
-            <div className="relative overflow-hidden rounded-none sm:rounded-2xl mx-0"
+            {/* Hero banner — personal sales summary */}
+            <div className="relative overflow-hidden rounded-none sm:rounded-2xl"
                 style={{ background: "linear-gradient(135deg,#0c4a6e 0%,#0891b2 60%,#06b6d4 100%)" }}>
-                {/* subtle grid texture */}
                 <div className="absolute inset-0 pointer-events-none opacity-[0.05]"
                     style={{ backgroundImage: "linear-gradient(rgba(255,255,255,1) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,1) 1px,transparent 1px)", backgroundSize: "24px 24px" }} />
                 <div className="relative px-4 sm:px-6 pt-5 pb-4">
                     <div className="flex items-start justify-between mb-4">
                         <div>
                             <p className="text-cyan-200 text-[0.62rem] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                                <Calendar size={10} />
-                                {bounds.label}
+                                <Calendar size={10} />{bounds.label}
                             </p>
-                            <p className="text-white text-[0.72rem] font-semibold opacity-80">Total Income</p>
+                            <p className="text-white text-[0.72rem] font-semibold opacity-80">
+                                My Sales — {staffName}
+                            </p>
                             {txLoad
                                 ? <div className="h-10 w-32 bg-white/10 rounded-xl animate-pulse mt-1" />
-                                : <p className="text-white font-black text-[2.2rem] leading-none syne mt-0.5">
-                                    {phpShort(totalSales)}
-                                </p>
+                                : <p className="text-white font-black text-[2.2rem] leading-none syne mt-0.5">{phpShort(totalSales)}</p>
                             }
                         </div>
-                        {/* mini stats column */}
                         <div className="flex flex-col gap-2 text-right">
                             <div className="bg-white/10 border border-white/15 rounded-xl px-3 py-2 min-w-[80px]">
                                 <p className="text-cyan-200 text-[0.55rem] font-bold uppercase tracking-wider">Orders</p>
@@ -865,7 +931,7 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
                         </div>
                     </div>
 
-                    {/* Date filter pills inside banner */}
+                    {/* Date filter pills */}
                     <div className="flex gap-1.5 overflow-x-auto no-scroll pb-0.5">
                         {([
                             { id: "today", label: "Today" },
@@ -889,7 +955,7 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
 
             <div className="px-3 sm:px-4 space-y-4">
 
-                {/* ── Custom range picker ── */}
+                {/* Custom date range picker */}
                 <AnimatePresence>
                     {showCustom && (
                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
@@ -914,52 +980,26 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
                     )}
                 </AnimatePresence>
 
-                {/* ── 4 stat cards — 2×2 grid, compact numbers ── */}
+                {/* Stat cards */}
                 <div className="grid grid-cols-2 gap-2.5">
                     {[
-                        {
-                            label: "Total Income", icon: <DollarSign size={15} />,
-                            color: "#0891b2", bg: "rgba(8,145,178,.08)",
-                            val: txLoad ? null : phpShort(totalSales),
-                            full: txLoad ? null : php(totalSales),
-                        },
-                        {
-                            label: "Total Orders", icon: <Receipt size={15} />,
-                            color: "#059669", bg: "rgba(5,150,105,.08)",
-                            val: txLoad ? null : numShort(totalOrders),
-                            full: null,
-                        },
-                        {
-                            label: "Items Sold", icon: <ShoppingBag size={15} />,
-                            color: "#f59e0b", bg: "rgba(245,158,11,.08)",
-                            val: txLoad ? null : numShort(totalItems),
-                            full: null,
-                        },
-                        {
-                            label: "Avg. Order", icon: <TrendingUp size={15} />,
-                            color: "#7c3aed", bg: "rgba(124,58,237,.08)",
-                            val: txLoad ? null : phpShort(avgOrder),
-                            full: txLoad ? null : php(avgOrder),
-                        },
+                        { label: "Total Income", icon: <DollarSign size={15} />, color: "#0891b2", bg: "rgba(8,145,178,.08)", val: txLoad ? null : phpShort(totalSales), full: txLoad ? null : php(totalSales) },
+                        { label: "Total Orders", icon: <Receipt size={15} />, color: "#059669", bg: "rgba(5,150,105,.08)", val: txLoad ? null : numShort(totalOrders), full: null },
+                        { label: "Items Sold", icon: <ShoppingBag size={15} />, color: "#f59e0b", bg: "rgba(245,158,11,.08)", val: txLoad ? null : numShort(totalItems), full: null },
+                        { label: "Avg. Order", icon: <TrendingUp size={15} />, color: "#7c3aed", bg: "rgba(124,58,237,.08)", val: txLoad ? null : phpShort(avgOrder), full: txLoad ? null : php(avgOrder) },
                     ].map((s, i) => (
                         <motion.div key={s.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                             className="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-sm overflow-hidden">
-                            {/* Icon + label row */}
                             <div className="flex items-center gap-2 mb-2.5">
-                                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                                    style={{ background: s.bg, color: s.color }}>
+                                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: s.bg, color: s.color }}>
                                     {s.icon}
                                 </div>
                                 <p className="text-[0.62rem] font-bold text-slate-400 uppercase tracking-wider leading-tight">{s.label}</p>
                             </div>
-                            {/* Big number — always fits because we use phpShort */}
                             {s.val === null
                                 ? <div className="h-7 w-3/4 bg-slate-100 rounded-lg animate-pulse" />
-                                : <p className="font-black text-slate-900 leading-none syne truncate" style={{ fontSize: "clamp(1.15rem,5vw,1.5rem)" }}>
-                                    {s.val}
-                                </p>
+                                : <p className="font-black text-slate-900 leading-none syne truncate" style={{ fontSize: "clamp(1.15rem,5vw,1.5rem)" }}>{s.val}</p>
                             }
-                            {/* Full value subtitle when shortened */}
                             {s.full && s.val && s.full !== s.val && (
                                 <p className="text-[0.58rem] text-slate-300 font-medium mt-0.5 truncate">{s.full}</p>
                             )}
@@ -967,11 +1007,11 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
                     ))}
                 </div>
 
-                {/* ── Transaction log ── */}
+                {/* Transaction log */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                     <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
                         <Receipt size={13} className="text-cyan-500" />
-                        <h3 className="font-black text-slate-900 text-[0.9rem] syne">Transaction Log</h3>
+                        <h3 className="font-black text-slate-900 text-[0.9rem] syne">My Transaction Log</h3>
                         <span className="text-[0.6rem] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full ml-auto">
                             {transactions.length} record{transactions.length !== 1 ? "s" : ""}
                         </span>
@@ -1003,32 +1043,23 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
                             {transactions.map((t, i) => {
                                 const items = txItems[t.id] ?? [];
                                 const isExp = expandedTx === t.id;
-                                const isStaff = !!t.sold_by_staff_id;
-                                const seller = t.sold_by_name ?? "Store Owner";
                                 const d = new Date(t.created_at);
                                 return (
                                     <div key={t.id}>
                                         <button onClick={() => setExpandedTx(isExp ? null : t.id)}
                                             className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50/60 active:bg-slate-100 transition-colors text-left">
-                                            {/* Index badge */}
                                             <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 border border-cyan-100"
                                                 style={{ background: "rgba(8,145,178,.06)" }}>
                                                 <span className="text-[0.62rem] font-black text-cyan-500 syne">#{i + 1}</span>
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                {/* Ref + badge */}
                                                 <div className="flex items-center gap-1.5 flex-wrap">
                                                     <p className="font-black text-slate-800 text-[0.78rem] syne truncate max-w-[130px]">{t.transaction_ref}</p>
-                                                    <span className={`text-[0.55rem] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${isStaff ? "text-cyan-600 bg-cyan-50" : "text-violet-600 bg-violet-50"}`}>
-                                                        {isStaff ? "Cashier" : "Owner"}
-                                                    </span>
                                                 </div>
-                                                {/* Seller + time + items */}
                                                 <p className="text-[0.65rem] text-slate-400 font-medium mt-0.5 truncate">
-                                                    {seller} · {timeAgo(t.created_at)} · {t.item_count} item{t.item_count !== 1 ? "s" : ""}
+                                                    {timeAgo(t.created_at)} · {t.item_count} item{t.item_count !== 1 ? "s" : ""}
                                                 </p>
                                             </div>
-                                            {/* Amount */}
                                             <div className="text-right flex-shrink-0">
                                                 <p className="font-black text-slate-900 text-[0.88rem] syne">{phpShort(Number(t.total_amount))}</p>
                                                 <p className="text-[0.6rem] text-emerald-500 font-bold">chg {phpShort(Number(t.change_amount))}</p>
@@ -1037,12 +1068,11 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
                                                 style={{ transform: isExp ? "rotate(180deg)" : "rotate(0deg)" }} />
                                         </button>
 
-                                        {/* ── Expanded: items with images ── */}
+                                        {/* Expanded item detail row */}
                                         <AnimatePresence>
                                             {isExp && (
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: .18 }} className="overflow-hidden">
                                                     <div className="px-4 pb-4 pt-1 bg-slate-50/60 border-t border-slate-100">
-                                                        {/* Transaction meta */}
                                                         <div className="flex items-center justify-between mb-2.5 pt-1">
                                                             <p className="text-[0.6rem] font-black text-slate-400 uppercase tracking-widest">Items Purchased</p>
                                                             <p className="text-[0.6rem] font-bold text-slate-400">
@@ -1058,9 +1088,7 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
                                                                 const c = cs(item.category);
                                                                 return (
                                                                     <div key={ii} className="flex items-center gap-2.5 bg-white rounded-xl p-2.5 border border-slate-100">
-                                                                        {/* Product image — actual photo */}
-                                                                        <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 flex items-center justify-center"
-                                                                            style={{ background: c.bg }}>
+                                                                        <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 flex items-center justify-center" style={{ background: c.bg }}>
                                                                             {imgUrl
                                                                                 ? <img src={imgUrl} alt={item.product_name} className="w-full h-full object-cover" />
                                                                                 : <Package size={14} style={{ color: c.color }} />}
@@ -1074,7 +1102,6 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
                                                                 );
                                                             })}
                                                         </div>
-                                                        {/* Receipt total footer */}
                                                         <div className="mt-3 pt-2.5 border-t border-slate-200 grid grid-cols-3 gap-2 text-center">
                                                             <div>
                                                                 <p className="text-[0.55rem] font-black text-slate-400 uppercase tracking-wider">Total</p>
@@ -1099,7 +1126,7 @@ function SalesPanel({ transactions, txItems, txLoad, totalSales, totalOrders, to
                         </div>
                     )}
 
-                    {/* Footer summary bar */}
+                    {/* Summary footer */}
                     {!txLoad && transactions.length > 0 && (
                         <div className="px-4 py-3 bg-gradient-to-r from-cyan-50/80 to-sky-50/60 border-t border-cyan-100">
                             <div className="grid grid-cols-3 gap-2 text-center">

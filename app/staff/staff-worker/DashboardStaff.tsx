@@ -8,9 +8,9 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/app/utils/supabase";
+import SignOutModal from "@/app/comps/signoutmodal/page";
 import Inventory from "./Inventory";
 import Reports from "./Reports";
-import Orders from "./Orders";
 
 interface StaffData {
     id: string;
@@ -33,35 +33,22 @@ interface OwnerStats {
 const NAV = [
     { id: "dashboard", label: "Dashboard", icon: <BarChart3 size={16} /> },
     { id: "inventory", label: "Inventory", icon: <Package size={16} /> },
-    { id: "orders", label: "Orders", icon: <ClipboardList size={16} /> },
     { id: "reports", label: "Reports", icon: <TrendingUp size={16} /> },
 ];
 
-// ── Export so POS / inventory pages can call it ────────────────────
 export async function logStaffAction(params: {
-    staff_id: string;
-    staff_name: string;
-    staff_role: string;
-    owner_id: string;
-    action_type: string;
-    description: string;
-    reference_id?: string;
-    metadata?: object;
+    staff_id: string; staff_name: string; staff_role: string; owner_id: string;
+    action_type: string; description: string; reference_id?: string; metadata?: object;
 }) {
     try {
         await supabase.rpc("log_staff_action", {
-            p_staff_id: params.staff_id,
-            p_staff_name: params.staff_name,
-            p_staff_role: params.staff_role,
-            p_owner_id: params.owner_id,
-            p_action_type: params.action_type,
-            p_description: params.description,
+            p_staff_id: params.staff_id, p_staff_name: params.staff_name,
+            p_staff_role: params.staff_role, p_owner_id: params.owner_id,
+            p_action_type: params.action_type, p_description: params.description,
             p_reference_id: params.reference_id ?? null,
             p_metadata: params.metadata ? JSON.stringify(params.metadata) : null,
         });
-    } catch (err) {
-        console.warn("log_staff_action failed:", err);
-    }
+    } catch (err) { console.warn("log_staff_action failed:", err); }
 }
 
 function timeAgo(dateStr: string) {
@@ -76,7 +63,6 @@ function Skeleton({ className }: { className?: string }) {
     return <div className={`animate-pulse bg-slate-100 rounded-xl ${className ?? ""}`} />;
 }
 
-// ── Logo — same pattern as DashboardCashier ────────────────────────
 function Logo({ size = 28 }: { size?: number }) {
     const [err, setErr] = useState(false);
     if (err) {
@@ -96,7 +82,7 @@ function Logo({ size = 28 }: { size?: number }) {
 
 export default function DashboardStaff({
     staff,
-    ownerStoreName = "your store",
+    ownerStoreName = "",
     ownerFullName = "",
 }: {
     staff: StaffData;
@@ -105,19 +91,14 @@ export default function DashboardStaff({
 }) {
     const router = useRouter();
 
-    // ── Persist active nav across page reloads ─────────────────────
     const [activeNav, setActiveNavState] = useState(() => {
-        if (typeof window !== "undefined") {
-            return sessionStorage.getItem("staff_active_nav") ?? "dashboard";
-        }
+        if (typeof window !== "undefined") return sessionStorage.getItem("staff_active_nav") ?? "dashboard";
         return "dashboard";
     });
-    const setActiveNav = (id: string) => {
-        setActiveNavState(id);
-        sessionStorage.setItem("staff_active_nav", id);
-    };
+    const setActiveNav = (id: string) => { setActiveNavState(id); sessionStorage.setItem("staff_active_nav", id); };
 
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [signOutOpen, setSignOutOpen] = useState(false);
     const [stats, setStats] = useState<OwnerStats | null>(null);
     const [statsLoading, setStatsLoading] = useState(true);
     const [recentActivity, setRecentActivity] = useState<any[]>([]);
@@ -130,7 +111,9 @@ export default function DashboardStaff({
     const timeStr = now.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" });
     const initials = staff.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
 
-    // ── Fetch store stats ──────────────────────────────────────────
+    const displayStoreName = ownerStoreName || "Your Store";
+    const displayOwnerName = ownerFullName || "—";
+
     useEffect(() => {
         const fetchStats = async () => {
             setStatsLoading(true);
@@ -143,7 +126,6 @@ export default function DashboardStaff({
         fetchStats();
     }, [staff.owner_id]);
 
-    // ── Fetch my activity log ──────────────────────────────────────
     useEffect(() => {
         const fetchActivity = async () => {
             setActivityLoading(true);
@@ -161,15 +143,13 @@ export default function DashboardStaff({
         fetchActivity();
     }, [staff.id]);
 
-    const handleSignOut = () => {
+    const handleSignOut = async () => {
         sessionStorage.removeItem("staff_session");
         sessionStorage.removeItem("staff_active_nav");
         router.replace("/auth/staff-cashier-worker-login");
     };
-    const handleNavClick = (id: string) => {
-        setActiveNav(id);
-        setMobileMenuOpen(false);
-    };
+
+    const handleNavClick = (id: string) => { setActiveNav(id); setMobileMenuOpen(false); };
 
     const totalLowStock = (stats?.low_stock_products ?? 0) + (stats?.low_stock_meals ?? 0);
     const totalProducts = (stats?.total_products ?? 0) + (stats?.total_meals ?? 0);
@@ -190,60 +170,51 @@ export default function DashboardStaff({
 
     return (
         <>
-            {/*
-             * Font pairing — identical to DashboardCashier:
-             *   body/ui        → Plus Jakarta Sans
-             *   headings/nums  → Syne (via .syne utility)
-             */}
             <style>{`
                 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Syne:wght@700;800;900&display=swap');
                 *, *::before, *::after { font-family:'Plus Jakarta Sans',sans-serif; box-sizing:border-box; }
                 h1,h2,h3,.syne { font-family:'Syne',sans-serif; }
+                @keyframes shimmerBar { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
             `}</style>
+
+            <SignOutModal
+                isOpen={signOutOpen}
+                storeName={displayStoreName}
+                onConfirm={handleSignOut}
+                onCancel={() => setSignOutOpen(false)}
+            />
 
             <div className="min-h-screen flex flex-col" style={{ background: "#F0F4F8" }}>
 
-                {/* ══════════════════════════════════════════════════════
-                    TOP NAVBAR
-                ══════════════════════════════════════════════════════ */}
+                {/* ── TOP NAVBAR ── */}
                 <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
                     <div className="max-w-7xl mx-auto px-4 sm:px-6">
                         <div className="flex items-center justify-between h-14">
 
-                            {/* Logo + brand */}
                             <div className="flex items-center gap-2.5">
                                 <Logo size={28} />
                                 <div className="hidden sm:block">
                                     <div className="font-black text-slate-900 text-[0.9rem] leading-none syne">
                                         SariSari<span className="text-violet-600">.</span>IMS
                                     </div>
-                                    <div className="text-[0.55rem] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
-                                        · Staff Portal
-                                    </div>
+                                    <div className="text-[0.55rem] font-bold uppercase tracking-widest text-slate-400 mt-0.5">· Staff Portal</div>
                                 </div>
                             </div>
 
-                            {/* Desktop nav tabs */}
                             <nav className="hidden md:flex items-center gap-1">
                                 {NAV.map(item => {
                                     const active = activeNav === item.id;
                                     return (
                                         <button key={item.id} onClick={() => handleNavClick(item.id)}
                                             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[0.82rem] font-semibold transition-all"
-                                            style={{
-                                                background: active ? "rgba(124,58,237,0.08)" : "transparent",
-                                                color: active ? "#7c3aed" : "#64748b",
-                                            }}>
-                                            {item.icon}
-                                            {item.label}
+                                            style={{ background: active ? "rgba(124,58,237,0.08)" : "transparent", color: active ? "#7c3aed" : "#64748b" }}>
+                                            {item.icon} {item.label}
                                         </button>
                                     );
                                 })}
                             </nav>
 
-                            {/* Right: avatar + sign out */}
                             <div className="flex items-center gap-2">
-                                {/* Avatar chip */}
                                 <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200">
                                     <div className="w-6 h-6 rounded-lg flex items-center justify-center font-black text-white text-[0.6rem] flex-shrink-0 syne"
                                         style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)" }}>
@@ -255,14 +226,12 @@ export default function DashboardStaff({
                                     </div>
                                 </div>
 
-                                {/* Sign out */}
-                                <button onClick={handleSignOut}
+                                <button onClick={() => setSignOutOpen(true)}
                                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[0.78rem] font-bold text-slate-500 hover:text-red-500 hover:bg-red-50 border border-slate-200 hover:border-red-100 transition-all">
                                     <LogOut size={13} />
                                     <span className="hidden sm:block">Sign Out</span>
                                 </button>
 
-                                {/* Mobile hamburger */}
                                 <button onClick={() => setMobileMenuOpen(v => !v)}
                                     className="md:hidden w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 transition-all">
                                     {mobileMenuOpen ? <X size={16} /> : <Menu size={16} />}
@@ -271,28 +240,19 @@ export default function DashboardStaff({
                         </div>
                     </div>
 
-                    {/* Mobile nav dropdown */}
                     <AnimatePresence>
                         {mobileMenuOpen && (
-                            <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: "auto" }}
-                                exit={{ opacity: 0, height: 0 }}
-                                transition={{ duration: 0.18 }}
-                                className="md:hidden border-t border-slate-100 bg-white overflow-hidden"
-                            >
+                            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }}
+                                className="md:hidden border-t border-slate-100 bg-white overflow-hidden">
                                 <div className="px-4 py-2 space-y-0.5">
                                     {NAV.map(item => {
                                         const active = activeNav === item.id;
                                         return (
                                             <button key={item.id} onClick={() => handleNavClick(item.id)}
                                                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-[0.85rem] transition-all text-left"
-                                                style={{
-                                                    background: active ? "rgba(124,58,237,0.08)" : "transparent",
-                                                    color: active ? "#7c3aed" : "#64748b",
-                                                }}>
-                                                {item.icon}
-                                                {item.label}
+                                                style={{ background: active ? "rgba(124,58,237,0.08)" : "transparent", color: active ? "#7c3aed" : "#64748b" }}>
+                                                {item.icon} {item.label}
                                                 {active && <ChevronRight size={13} className="ml-auto" />}
                                             </button>
                                         );
@@ -303,16 +263,11 @@ export default function DashboardStaff({
                     </AnimatePresence>
                 </header>
 
-                {/* ══════════════════════════════════════════════════════
-                    PAGE CONTENT
-                ══════════════════════════════════════════════════════ */}
+                {/* ── PAGE CONTENT ── */}
                 <main className="flex-1 overflow-y-auto">
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
 
-                        {/* Date / time sub-header */}
-                        <p className="text-[0.72rem] text-slate-400 font-medium mb-5">
-                            {dateStr} · {timeStr}
-                        </p>
+                        <p className="text-[0.72rem] text-slate-400 font-medium mb-5">{dateStr} · {timeStr}</p>
 
                         {/* ── DASHBOARD ── */}
                         {activeNav === "dashboard" && (
@@ -321,10 +276,8 @@ export default function DashboardStaff({
                                 {/* Welcome banner */}
                                 <div className="mb-6 rounded-2xl text-white relative overflow-hidden"
                                     style={{ background: "linear-gradient(135deg,#1e0a3c 0%,#4c1d95 60%,#7c3aed 100%)" }}>
-                                    {/* grid texture */}
                                     <div className="absolute inset-0 pointer-events-none opacity-[0.06]"
                                         style={{ backgroundImage: "linear-gradient(rgba(255,255,255,1) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,1) 1px,transparent 1px)", backgroundSize: "28px 28px" }} />
-                                    {/* glow */}
                                     <div className="absolute pointer-events-none"
                                         style={{ top: -60, right: -60, width: 300, height: 300, background: "radial-gradient(circle,rgba(167,139,250,0.25) 0%,transparent 65%)" }} />
 
@@ -335,46 +288,31 @@ export default function DashboardStaff({
                                                     <span className="w-1.5 h-1.5 rounded-full bg-violet-400" style={{ boxShadow: "0 0 6px #a78bfa" }} />
                                                     {greeting}
                                                 </p>
-                                                <h2 className="font-black text-2xl leading-tight mb-1 syne">
-                                                    {staff.full_name} 👋
-                                                </h2>
+                                                <h2 className="font-black text-2xl leading-tight mb-1 syne">{staff.full_name} 👋</h2>
                                                 <p className="text-violet-300 text-[0.82rem]">
                                                     Logged in as{" "}
-                                                    <span className="capitalize font-black text-white px-2 py-0.5 rounded-lg bg-white/10">
-                                                        {staff.role}
-                                                    </span>
+                                                    <span className="capitalize font-black text-white px-2 py-0.5 rounded-lg bg-white/10">{staff.role}</span>
                                                     {" "}· Activity tracked
                                                 </p>
                                             </div>
 
-                                            {/* Store info card */}
                                             <div className="bg-white/10 border border-white/15 rounded-2xl px-5 py-4 shrink-0 min-w-[200px]">
-                                                <p className="text-violet-300 text-[0.58rem] font-black uppercase tracking-[0.18em] mb-2">
-                                                    Store You Work At
-                                                </p>
-                                                <p className="text-white font-black text-xl leading-tight mb-1 syne">
-                                                    {ownerStoreName}
-                                                </p>
+                                                <p className="text-violet-300 text-[0.58rem] font-black uppercase tracking-[0.18em] mb-2">Store You Work At</p>
+                                                <p className="text-white font-black text-xl leading-tight mb-1 syne">{displayStoreName}</p>
                                                 <div className="h-px bg-white/15 mb-2" />
-                                                <p className="text-violet-300 text-[0.6rem] font-black uppercase tracking-[0.15em] mb-0.5">
-                                                    Store Owner
-                                                </p>
-                                                <p className="text-white font-bold text-[0.85rem]">
-                                                    {ownerFullName || "—"}
-                                                </p>
+                                                <p className="text-violet-300 text-[0.6rem] font-black uppercase tracking-[0.15em] mb-0.5">Store Owner</p>
+                                                <p className="text-white font-bold text-[0.85rem]">{displayOwnerName}</p>
                                             </div>
                                         </div>
 
-                                        {/* Quick info pills */}
                                         <div className="flex flex-wrap gap-2">
                                             {[
-                                                { label: "Store", value: ownerStoreName },
-                                                { label: "Owner", value: ownerFullName || "—" },
+                                                { label: "Store", value: displayStoreName },
+                                                { label: "Owner", value: displayOwnerName },
                                                 { label: "Role", value: staff.role ? staff.role.charAt(0).toUpperCase() + staff.role.slice(1) : "—" },
                                                 { label: "Status", value: staff.status ? staff.status.charAt(0).toUpperCase() + staff.status.slice(1) : "—" },
                                             ].map(pill => (
-                                                <div key={pill.label}
-                                                    className="flex items-center gap-1.5 bg-white/8 border border-white/15 rounded-full px-3 py-1">
+                                                <div key={pill.label} className="flex items-center gap-1.5 bg-white/8 border border-white/15 rounded-full px-3 py-1">
                                                     <span className="text-violet-300 text-[0.6rem] font-bold uppercase tracking-wider">{pill.label}:</span>
                                                     <span className="text-white text-[0.75rem] font-black">{pill.value}</span>
                                                 </div>
@@ -387,20 +325,13 @@ export default function DashboardStaff({
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                                     {statCards.map((s, i) => (
                                         <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
-                                            className={`bg-white rounded-2xl p-5 border border-slate-100 shadow-sm ${s.label === "Today's Orders" ? "cursor-pointer hover:border-emerald-200 hover:shadow-md transition-all" : ""}`}
-                                            onClick={s.label === "Today's Orders" ? () => handleNavClick("orders") : undefined}>
-                                            <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
-                                                style={{ background: s.bg, color: s.color }}>{s.icon}</div>
+                                            className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+                                            <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-4" style={{ background: s.bg, color: s.color }}>{s.icon}</div>
                                             {s.val === null
                                                 ? <Skeleton className="h-7 w-14 mb-1" />
                                                 : <div className="font-black text-2xl leading-none mb-1 syne" style={{ color: s.color }}>{s.val}</div>
                                             }
-                                            <div className="flex items-center justify-between">
-                                                <div className="text-[0.7rem] text-slate-400 font-medium">{s.label}</div>
-                                                {s.label === "Today's Orders" && (
-                                                    <span className="text-[9px] font-black text-emerald-500">View →</span>
-                                                )}
-                                            </div>
+                                            <div className="text-[0.7rem] text-slate-400 font-medium">{s.label}</div>
                                         </motion.div>
                                     ))}
                                 </div>
@@ -408,7 +339,6 @@ export default function DashboardStaff({
                                 {/* Two-column: account + activity */}
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-                                    {/* Your Account */}
                                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                                         <div className="px-5 py-4 border-b border-slate-100">
                                             <h3 className="font-black text-slate-900 text-[0.95rem] syne">Your Account</h3>
@@ -428,16 +358,13 @@ export default function DashboardStaff({
                                         </div>
                                     </div>
 
-                                    {/* My Activity */}
                                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                                         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                                             <div className="flex items-center gap-2">
                                                 <Activity size={14} className="text-violet-500" />
                                                 <h3 className="font-black text-slate-900 text-[0.95rem] syne">My Activity</h3>
                                             </div>
-                                            <span className="text-[0.62rem] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                                                Actions I performed
-                                            </span>
+                                            <span className="text-[0.62rem] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Actions I performed</span>
                                         </div>
 
                                         {activityLoading ? (
@@ -445,17 +372,13 @@ export default function DashboardStaff({
                                                 {[...Array(3)].map((_, i) => (
                                                     <div key={i} className="flex items-center gap-3 animate-pulse">
                                                         <Skeleton className="w-8 h-8 shrink-0" />
-                                                        <div className="flex-1 space-y-1.5">
-                                                            <Skeleton className="h-2.5 w-3/4" />
-                                                            <Skeleton className="h-2 w-1/2" />
-                                                        </div>
+                                                        <div className="flex-1 space-y-1.5"><Skeleton className="h-2.5 w-3/4" /><Skeleton className="h-2 w-1/2" /></div>
                                                     </div>
                                                 ))}
                                             </div>
                                         ) : recentActivity.length === 0 ? (
                                             <div className="flex flex-col items-center justify-center py-10 gap-2">
-                                                <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
-                                                    style={{ background: "rgba(124,58,237,0.07)", color: "#7c3aed" }}>
+                                                <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: "rgba(124,58,237,0.07)", color: "#7c3aed" }}>
                                                     <Tag size={18} />
                                                 </div>
                                                 <p className="text-slate-400 text-sm font-medium">No activity yet.</p>
@@ -475,9 +398,7 @@ export default function DashboardStaff({
                                                                 <p className="text-[0.8rem] font-bold text-slate-800 truncate">{act.description}</p>
                                                                 <div className="flex items-center gap-2 mt-0.5">
                                                                     <span className="text-[0.62rem] font-bold px-1.5 py-0.5 rounded"
-                                                                        style={{ background: `${meta.color}14`, color: meta.color }}>
-                                                                        {meta.label}
-                                                                    </span>
+                                                                        style={{ background: `${meta.color}14`, color: meta.color }}>{meta.label}</span>
                                                                     <span className="text-[0.62rem] text-slate-400 flex items-center gap-0.5">
                                                                         <Clock size={9} /> {timeAgo(act.created_at)}
                                                                     </span>
@@ -493,41 +414,15 @@ export default function DashboardStaff({
                             </motion.div>
                         )}
 
-                        {/* ── INVENTORY ── */}
                         {activeNav === "inventory" && (
                             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}>
-                                <Inventory ownerIdProp={staff.owner_id} ownerStoreName={ownerStoreName} />
+                                <Inventory ownerIdProp={staff.owner_id} ownerStoreName={displayStoreName} />
                             </motion.div>
                         )}
 
-                        {/* ── ORDERS ── */}
-                        {activeNav === "orders" && (
-                            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}>
-                                <Orders ownerIdProp={staff.owner_id} ownerStoreName={ownerStoreName} />
-                            </motion.div>
-                        )}
-
-                        {/* ── REPORTS ── */}
                         {activeNav === "reports" && (
                             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}>
-                                <Reports ownerStoreName={ownerStoreName} />
-                            </motion.div>
-                        )}
-
-                        {/* ── COMING SOON ── */}
-                        {activeNav !== "dashboard" && activeNav !== "inventory" && activeNav !== "orders" && activeNav !== "reports" && (
-                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                                className="flex flex-col items-center justify-center h-64 gap-4">
-                                <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                                    style={{ background: "rgba(124,58,237,0.08)", color: "#7c3aed" }}>
-                                    {NAV.find(n => n.id === activeNav)?.icon}
-                                </div>
-                                <div className="text-center">
-                                    <h3 className="font-black text-slate-700 text-lg mb-1 syne">
-                                        {NAV.find(n => n.id === activeNav)?.label}
-                                    </h3>
-                                    <p className="text-slate-400 text-sm">This section is coming soon.</p>
-                                </div>
+                                <Reports ownerStoreName={displayStoreName} ownerFullName={displayOwnerName} />
                             </motion.div>
                         )}
 

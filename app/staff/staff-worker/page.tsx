@@ -19,7 +19,6 @@ interface OwnerProfile {
     full_name: string | null;
 }
 
-// ── Logo — same pattern as DashboardCashier / DashboardStaff ─────
 function Logo({ size = 48 }: { size?: number }) {
     const [err, setErr] = useState(false);
     if (err) {
@@ -62,7 +61,6 @@ export default function StaffWorkerPage() {
             try {
                 const session = JSON.parse(raw) as StaffData;
 
-                // Only allow staff / manager roles (not cashier)
                 if (session.role === "cashier") {
                     router.replace("/auth/staff-cashier-worker-login");
                     return;
@@ -70,14 +68,34 @@ export default function StaffWorkerPage() {
 
                 setStaff(session);
 
-                // Fetch owner profile — use async/await to avoid PromiseLike.finally() error
-                const { data } = await supabase
-                    .from("profiles")
-                    .select("store_name, full_name")
-                    .eq("id", session.owner_id)
-                    .single();
+                // Fetch owner's profile using the SECURITY DEFINER RPC so anon
+                // can read the owner's profiles row without RLS blocking it.
+                // Falls back to a direct .select() in case the RPC doesn't exist.
+                let storeName: string | null = null;
+                let fullName: string | null = null;
 
-                if (data) setOwnerProfile(data as OwnerProfile);
+                const { data: rpcData, error: rpcErr } = await supabase
+                    .rpc("get_owner_profile", { p_owner_id: session.owner_id });
+
+                if (!rpcErr && rpcData && rpcData.length > 0) {
+                    storeName = rpcData[0].store_name ?? null;
+                    fullName = rpcData[0].full_name ?? null;
+                } else {
+                    // Fallback: direct query (works if RLS allows anon SELECT on profiles)
+                    const { data: profData } = await supabase
+                        .from("profiles")
+                        .select("store_name, full_name")
+                        .eq("id", session.owner_id)
+                        .maybeSingle();
+
+                    if (profData) {
+                        storeName = profData.store_name ?? null;
+                        fullName = profData.full_name ?? null;
+                    }
+                }
+
+                setOwnerProfile({ store_name: storeName, full_name: fullName });
+
             } catch {
                 router.replace("/auth/staff-cashier-worker-login");
             } finally {
@@ -98,23 +116,16 @@ export default function StaffWorkerPage() {
                     @keyframes fade-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
                     .fade-in { animation: fade-in 0.4s ease forwards; }
                 `}</style>
-                <div
-                    className="min-h-screen flex flex-col items-center justify-center gap-5 fade-in"
-                    style={{ background: "#F0F4F8" }}
-                >
+                <div className="min-h-screen flex flex-col items-center justify-center gap-5 fade-in" style={{ background: "#F0F4F8" }}>
                     <Logo size={56} />
                     <div className="text-center">
                         <p className="font-black text-slate-700 text-[0.95rem] syne">SariSari<span className="text-violet-600">.</span>IMS</p>
                         <p className="text-[0.72rem] text-slate-400 font-medium mt-1 uppercase tracking-widest">Staff Portal</p>
                     </div>
-                    {/* Loading dots */}
                     <div className="flex items-center gap-1.5">
                         {[0, 1, 2].map(i => (
-                            <div
-                                key={i}
-                                className="w-1.5 h-1.5 rounded-full bg-violet-400"
-                                style={{ animation: `fade-in 0.6s ease ${i * 0.15}s infinite alternate` }}
-                            />
+                            <div key={i} className="w-1.5 h-1.5 rounded-full bg-violet-400"
+                                style={{ animation: `fade-in 0.6s ease ${i * 0.15}s infinite alternate` }} />
                         ))}
                     </div>
                 </div>
@@ -125,7 +136,7 @@ export default function StaffWorkerPage() {
     return (
         <DashboardStaff
             staff={staff}
-            ownerStoreName={ownerProfile?.store_name ?? "your store"}
+            ownerStoreName={ownerProfile?.store_name ?? ""}
             ownerFullName={ownerProfile?.full_name ?? ""}
         />
     );
