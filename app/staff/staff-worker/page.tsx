@@ -58,30 +58,34 @@ export default function StaffWorkerPage() {
             return;
         }
 
-        try {
-            const session = JSON.parse(raw) as StaffData;
+        const init = async () => {
+            try {
+                const session = JSON.parse(raw) as StaffData;
 
-            // Only allow staff / manager roles (not cashier)
-            if (session.role === "cashier") {
+                // Only allow staff / manager roles (not cashier)
+                if (session.role === "cashier") {
+                    router.replace("/auth/staff-cashier-worker-login");
+                    return;
+                }
+
+                setStaff(session);
+
+                // Fetch owner profile — use async/await to avoid PromiseLike.finally() error
+                const { data } = await supabase
+                    .from("profiles")
+                    .select("store_name, full_name")
+                    .eq("id", session.owner_id)
+                    .single();
+
+                if (data) setOwnerProfile(data as OwnerProfile);
+            } catch {
                 router.replace("/auth/staff-cashier-worker-login");
-                return;
+            } finally {
+                setLoading(false);
             }
+        };
 
-            setStaff(session);
-
-            // Fetch owner profile (store name + owner full name)
-            supabase
-                .from("profiles")
-                .select("store_name, full_name")
-                .eq("id", session.owner_id)
-                .single()
-                .then(({ data }) => {
-                    if (data) setOwnerProfile(data as OwnerProfile);
-                })
-                .finally(() => setLoading(false));
-        } catch {
-            router.replace("/auth/staff-cashier-worker-login");
-        }
+        init();
     }, [router]);
 
     if (loading || !staff) {
