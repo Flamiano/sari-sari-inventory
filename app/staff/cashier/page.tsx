@@ -26,8 +26,7 @@ export default function CashierPage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // ── Set viewport-fit=cover so the bottom nav covers the system nav bar ──
-        // This makes the browser go edge-to-edge on mobile (hides the 3-button row)
+        // Set viewport-fit=cover so the bottom nav covers the system nav bar
         const existing = document.querySelector('meta[name="viewport"]');
         const content = "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content";
         if (existing) {
@@ -45,28 +44,33 @@ export default function CashierPage() {
             return;
         }
 
-        try {
-            const session = JSON.parse(raw) as StaffData;
+        const init = async () => {
+            try {
+                const session = JSON.parse(raw) as StaffData;
 
-            if (session.role !== "cashier") {
+                if (session.role !== "cashier") {
+                    router.replace("/auth/staff-cashier-worker-login");
+                    return;
+                }
+
+                setStaff(session);
+
+                // Use async/await instead of .then().finally() — avoids PromiseLike issue
+                const { data } = await supabase
+                    .from("profiles")
+                    .select("store_name, full_name")
+                    .eq("id", session.owner_id)
+                    .single();
+
+                if (data) setOwnerProfile(data as OwnerProfile);
+            } catch {
                 router.replace("/auth/staff-cashier-worker-login");
-                return;
+            } finally {
+                setLoading(false);
             }
+        };
 
-            setStaff(session);
-
-            supabase
-                .from("profiles")
-                .select("store_name, full_name")
-                .eq("id", session.owner_id)
-                .single()
-                .then(({ data }) => {
-                    if (data) setOwnerProfile(data as OwnerProfile);
-                })
-                .finally(() => setLoading(false));
-        } catch {
-            router.replace("/auth/staff-cashier-worker-login");
-        }
+        init();
     }, [router]);
 
     if (loading || !staff) {
