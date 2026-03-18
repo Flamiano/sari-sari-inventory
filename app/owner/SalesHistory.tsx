@@ -5,15 +5,17 @@ import {
     Loader2, ChefHat, Store, UtensilsCrossed, Package,
     Calendar, TrendingUp, DollarSign, ShoppingBag,
     ChevronDown, ChevronUp, FileText, FileSpreadsheet,
-    Eye, Tag, Filter, ArrowUpRight, Banknote,
+    Eye, Tag, Filter, ArrowUpRight, Banknote, User, UserCheck,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { supabase } from "@/app/utils/supabase";
+import SecurePageGate from "./SecurePageGate";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface TransactionItem {
     id: string;
+    transaction_id: string;
     product_name: string;
     category: string;
     subcategory: string | null;
@@ -32,10 +34,13 @@ interface Transaction {
     amount_paid: number;
     change_amount: number;
     item_count: number;
+    sold_by_name: string | null;
+    sold_by_staff_id: string | null;
 }
 
 type DateFilter = "today" | "week" | "month" | "custom";
 type CategoryFilter = "All" | "Almusal" | "Sari-Sari" | "Meryenda";
+type SellerFilter = "all" | "owner" | "cashier";
 
 const php = (n: number) =>
     `₱${Number(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -52,12 +57,36 @@ const SARI_SARI_SUBCATEGORIES = [
     "Baby Products", "Cigarettes", "School Supplies", "Kitchenware", "Frozen Goods",
 ] as const;
 
-const CAT_STYLE: Record<string, { bg: string; text: string; activeBg: string; border: string; icon: React.ElementType; fill: string }> = {
+const CAT_STYLE: Record<string, {
+    bg: string; text: string; activeBg: string; border: string;
+    icon: React.ElementType; fill: string;
+}> = {
     All: { bg: "bg-slate-100", text: "text-slate-600", activeBg: "bg-slate-900", border: "border-slate-200", icon: Package, fill: "#64748b" },
     Almusal: { bg: "bg-amber-50", text: "text-amber-700", activeBg: "bg-amber-500", border: "border-amber-200", icon: ChefHat, fill: "#f59e0b" },
     "Sari-Sari": { bg: "bg-blue-50", text: "text-blue-700", activeBg: "bg-blue-600", border: "border-blue-200", icon: Store, fill: "#2563eb" },
     Meryenda: { bg: "bg-orange-50", text: "text-orange-700", activeBg: "bg-orange-500", border: "border-orange-200", icon: UtensilsCrossed, fill: "#f97316" },
 };
+
+// ─── Seller badge ──────────────────────────────────────────────────────────────
+
+function SellerBadge({ soldByName, soldByStaffId, small = false }: {
+    soldByName: string | null;
+    soldByStaffId: string | null;
+    small?: boolean;
+}) {
+    const isCashier = !!soldByStaffId;
+    const label = isCashier ? (soldByName ?? "Cashier") : "Store Owner";
+    const sz = small ? "text-[8px] px-1.5 py-0.5" : "text-[9px] px-2 py-1";
+    return (
+        <span className={`inline-flex items-center gap-1 font-black rounded-md uppercase tracking-wide whitespace-nowrap ${sz} ${isCashier
+                ? "bg-cyan-50 text-cyan-700 border border-cyan-200"
+                : "bg-violet-50 text-violet-700 border border-violet-200"
+            }`}>
+            {isCashier ? <UserCheck size={small ? 7 : 9} /> : <User size={small ? 7 : 9} />}
+            {label}
+        </span>
+    );
+}
 
 // ─── Transaction Detail Modal ──────────────────────────────────────────────────
 
@@ -66,12 +95,19 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        supabase.from("sales_transaction_items").select("*").eq("transaction_id", txn.id).order("category")
+        supabase
+            .from("sales_transaction_items")
+            .select("*")
+            .eq("transaction_id", txn.id)
+            .order("category")
             .then(({ data }) => { setItems(data ?? []); setLoading(false); });
     }, [txn.id]);
 
     const d = new Date(txn.created_at);
     const totalProfit = items.reduce((s, i) => s + Number(i.profit), 0);
+    const isCashier = !!txn.sold_by_staff_id;
+    const sellerLabel = isCashier ? (txn.sold_by_name ?? "Cashier") : "Store Owner";
+
     const grouped = items.reduce((acc, item) => {
         if (!acc[item.category]) acc[item.category] = [];
         acc[item.category].push(item);
@@ -79,10 +115,13 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
     }, {} as Record<string, TransactionItem[]>);
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
             style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)" }}
-            onClick={e => e.target === e.currentTarget && onClose()}>
+            onClick={e => e.target === e.currentTarget && onClose()}
+        >
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "90vh" }}>
+
                 {/* Header */}
                 <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 text-white">
                     <div className="flex items-start justify-between mb-4">
@@ -101,6 +140,18 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
                             <X size={16} className="text-white" />
                         </button>
                     </div>
+
+                    {/* Sold by chip */}
+                    <div className="mb-4">
+                        <span className={`inline-flex items-center gap-1.5 text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest ${isCashier
+                                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                                : "bg-violet-500/20 text-violet-300 border border-violet-500/30"
+                            }`}>
+                            {isCashier ? <UserCheck size={10} /> : <User size={10} />}
+                            Sold by: {sellerLabel}
+                        </span>
+                    </div>
+
                     <div className="grid grid-cols-3 gap-2">
                         {[
                             { label: "Total", value: php(txn.total_amount), accent: false },
@@ -118,7 +169,9 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
                 {/* Items */}
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
                     {loading ? (
-                        <div className="flex items-center justify-center py-12"><Loader2 size={24} className="animate-spin text-slate-300" /></div>
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 size={24} className="animate-spin text-slate-300" />
+                        </div>
                     ) : Object.keys(grouped).length === 0 ? (
                         <p className="text-center text-slate-400 text-sm py-8">No items found.</p>
                     ) : (
@@ -160,7 +213,7 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
                     )}
                 </div>
 
-                {/* Footer totals */}
+                {/* Footer */}
                 <div className="border-t border-slate-100 bg-slate-50 px-5 py-4 space-y-2 rounded-b-3xl">
                     {[
                         { label: "Total Amount", value: php(txn.total_amount) },
@@ -213,14 +266,10 @@ async function exportSalesPDF(transactions: Transaction[], allItems: Transaction
     const now = new Date();
     const refNumber = `RPT-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
     const C = {
-        black: [10, 10, 10] as [number, number, number],
-        dark: [30, 30, 30] as [number, number, number],
-        mid: [80, 80, 80] as [number, number, number],
-        light: [150, 150, 150] as [number, number, number],
-        rule: [210, 210, 210] as [number, number, number],
-        bg: [247, 247, 247] as [number, number, number],
-        white: [255, 255, 255] as [number, number, number],
-        positive: [22, 101, 52] as [number, number, number],
+        black: [10, 10, 10] as [number, number, number], dark: [30, 30, 30] as [number, number, number],
+        mid: [80, 80, 80] as [number, number, number], light: [150, 150, 150] as [number, number, number],
+        rule: [210, 210, 210] as [number, number, number], bg: [247, 247, 247] as [number, number, number],
+        white: [255, 255, 255] as [number, number, number], positive: [22, 101, 52] as [number, number, number],
         negative: [153, 27, 27] as [number, number, number],
     };
     const drawFrame = () => {
@@ -237,53 +286,38 @@ async function exportSalesPDF(transactions: Transaction[], allItems: Transaction
     const totalSales = transactions.reduce((s, t) => s + Number(t.total_amount), 0);
     const totalProfit = allItems.reduce((s, i) => s + Number(i.profit), 0);
     const colW = (pw - 26) / 4;
-    [["DATE RANGE", dateLabel], ["FILTER", label], ["TRANSACTIONS", String(transactions.length)], ["TOTAL SALES", `PHP ${totalSales.toFixed(2)}`]].forEach(([lbl, val], i) => {
-        const x = 16 + i * colW;
-        doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...C.light); doc.text(lbl, x, metaY - 3.5);
-        doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(...C.dark); doc.text(val, x, metaY + 2);
-    });
+    [["DATE RANGE", dateLabel], ["FILTER", label], ["TRANSACTIONS", String(transactions.length)], ["TOTAL SALES", `PHP ${totalSales.toFixed(2)}`]]
+        .forEach(([lbl, val], i) => {
+            const x = 16 + i * colW;
+            doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...C.light); doc.text(lbl, x, metaY - 3.5);
+            doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(...C.dark); doc.text(val, x, metaY + 2);
+        });
     doc.setDrawColor(...C.rule); doc.setLineWidth(0.2); doc.line(16, metaY + 5.5, pw - 10, metaY + 5.5);
-    const summY = metaY + 10;
-    const boxW = (pw - 26) / 4 - 1;
-    [
-        { label: "TOTAL SALES", value: `PHP ${totalSales.toFixed(2)}`, note: "revenue" },
-        { label: "TOTAL PROFIT", value: `PHP ${totalProfit.toFixed(2)}`, note: "earned" },
-        { label: "TRANSACTIONS", value: String(transactions.length), note: "orders" },
-        { label: "ITEMS SOLD", value: String(transactions.reduce((s, t) => s + t.item_count, 0)), note: "units" },
-    ].forEach((item, i) => {
-        const x = 16 + i * (boxW + 1.5);
-        doc.setFillColor(...C.bg); doc.setDrawColor(...C.rule); doc.setLineWidth(0.2); doc.rect(x, summY, boxW, 15, "FD");
-        doc.setFillColor(...C.black); doc.rect(x, summY, 2, 15, "F");
-        doc.setFont("helvetica", "normal"); doc.setFontSize(5.5); doc.setTextColor(...C.light); doc.text(item.label, x + 4.5, summY + 4.5);
-        doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...C.dark); doc.text(item.value, x + 4.5, summY + 10);
-        doc.setFont("helvetica", "normal"); doc.setFontSize(5); doc.setTextColor(...C.light); doc.text(item.note, x + 4.5, summY + 13.5);
-    });
+    const summY = metaY + 10; const boxW = (pw - 26) / 4 - 1;
+    [{ label: "TOTAL SALES", value: `PHP ${totalSales.toFixed(2)}`, note: "revenue" }, { label: "TOTAL PROFIT", value: `PHP ${totalProfit.toFixed(2)}`, note: "earned" }, { label: "TRANSACTIONS", value: String(transactions.length), note: "orders" }, { label: "ITEMS SOLD", value: String(transactions.reduce((s, t) => s + t.item_count, 0)), note: "units" }]
+        .forEach((item, i) => {
+            const x = 16 + i * (boxW + 1.5);
+            doc.setFillColor(...C.bg); doc.setDrawColor(...C.rule); doc.setLineWidth(0.2); doc.rect(x, summY, boxW, 15, "FD");
+            doc.setFillColor(...C.black); doc.rect(x, summY, 2, 15, "F");
+            doc.setFont("helvetica", "normal"); doc.setFontSize(5.5); doc.setTextColor(...C.light); doc.text(item.label, x + 4.5, summY + 4.5);
+            doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...C.dark); doc.text(item.value, x + 4.5, summY + 10);
+            doc.setFont("helvetica", "normal"); doc.setFontSize(5); doc.setTextColor(...C.light); doc.text(item.note, x + 4.5, summY + 13.5);
+        });
     autoTable(doc, {
         startY: summY + 19,
-        head: [["#", "Transaction Ref", "Date & Time", "Product", "Category", "Subcategory", "Qty", "Unit Price", "Subtotal", "Profit"]],
+        head: [["#", "Transaction Ref", "Date & Time", "Sold By", "Product", "Category", "Subcategory", "Qty", "Unit Price", "Subtotal", "Profit"]],
         body: allItems.map((item, i) => {
-            const txn = transactions.find(t => t.id === (item as any).transaction_id);
-            return [i + 1, txn?.transaction_ref ?? "—", txn ? new Date(txn.created_at).toLocaleString("en-PH", { dateStyle: "short", timeStyle: "short" }) : "—", item.product_name, item.category, item.subcategory ?? "—", item.quantity, `PHP ${Number(item.unit_price).toFixed(2)}`, `PHP ${Number(item.subtotal).toFixed(2)}`, `PHP ${Number(item.profit).toFixed(2)}`];
+            const txn = transactions.find(t => t.id === item.transaction_id);
+            const seller = txn?.sold_by_staff_id ? (txn?.sold_by_name ?? "Cashier") : "Store Owner";
+            return [i + 1, txn?.transaction_ref ?? "—", txn ? new Date(txn.created_at).toLocaleString("en-PH", { dateStyle: "short", timeStyle: "short" }) : "—", seller, item.product_name, item.category, item.subcategory ?? "—", item.quantity, `PHP ${Number(item.unit_price).toFixed(2)}`, `PHP ${Number(item.subtotal).toFixed(2)}`, `PHP ${Number(item.profit).toFixed(2)}`];
         }),
         theme: "grid",
         styles: { font: "helvetica", fontSize: 7, cellPadding: { top: 2.5, bottom: 2.5, left: 3, right: 3 }, lineColor: C.rule, lineWidth: 0.15, textColor: C.dark },
         headStyles: { fillColor: C.black, textColor: C.white, fontStyle: "bold", fontSize: 6.5, cellPadding: { top: 3, bottom: 3, left: 3, right: 3 } },
         alternateRowStyles: { fillColor: [252, 252, 252] },
-        columnStyles: { 0: { halign: "center", cellWidth: 7, textColor: C.light }, 1: { fontStyle: "bold", cellWidth: 32 }, 9: { halign: "right", fontStyle: "bold" } },
-        didParseCell(data: any) {
-            if (data.section !== "body" || data.column.index !== 9) return;
-            const n = parseFloat(String(data.cell.raw).replace("PHP ", ""));
-            data.cell.styles.textColor = n >= 0 ? [...C.positive] : [...C.negative];
-        },
-        didDrawPage() {
-            drawFrame();
-            const pg = (doc as any).internal.getCurrentPageInfo().pageNumber;
-            doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...C.light);
-            doc.text("Sari-Store Sales Report", 16, ph - 12);
-            doc.text(`Ref: ${refNumber}`, pw / 2, ph - 12, { align: "center" });
-            doc.text(`Page ${pg}  ·  ${now.toLocaleDateString("en-PH")}`, pw - 12, ph - 12, { align: "right" });
-            doc.setDrawColor(...C.rule); doc.setLineWidth(0.15); doc.line(16, ph - 15, pw - 10, ph - 15);
-        },
+        columnStyles: { 0: { halign: "center", cellWidth: 7, textColor: C.light }, 1: { fontStyle: "bold", cellWidth: 28 }, 10: { halign: "right", fontStyle: "bold" } },
+        didParseCell(data: any) { if (data.section !== "body" || data.column.index !== 10) return; const n = parseFloat(String(data.cell.raw).replace("PHP ", "")); data.cell.styles.textColor = n >= 0 ? [...C.positive] : [...C.negative]; },
+        didDrawPage() { drawFrame(); const pg = (doc as any).internal.getCurrentPageInfo().pageNumber; doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...C.light); doc.text("Sari-Store Sales Report", 16, ph - 12); doc.text(`Ref: ${refNumber}`, pw / 2, ph - 12, { align: "center" }); doc.text(`Page ${pg}  ·  ${now.toLocaleDateString("en-PH")}`, pw - 12, ph - 12, { align: "right" }); doc.setDrawColor(...C.rule); doc.setLineWidth(0.15); doc.line(16, ph - 15, pw - 10, ph - 15); },
     });
     doc.save(`sales-report-${label.toLowerCase().replace(/[\s/]+/g, "-")}-${refNumber}.pdf`);
 }
@@ -296,9 +330,10 @@ async function exportSalesExcel(transactions: Transaction[], allItems: Transacti
     const totalSales = transactions.reduce((s, t) => s + Number(t.total_amount), 0);
     const totalProfit = allItems.reduce((s, i) => s + Number(i.profit), 0);
     const rows = allItems.map((item, i) => {
-        const txn = transactions.find(t => t.id === (item as any).transaction_id);
+        const txn = transactions.find(t => t.id === item.transaction_id);
         const d = txn ? new Date(txn.created_at) : new Date();
-        return [i + 1, txn?.transaction_ref ?? "—", d.toLocaleDateString("en-PH"), d.toLocaleTimeString("en-PH", { timeStyle: "short" }), item.product_name, item.category, item.subcategory ?? "—", item.quantity, Number(item.unit_price).toFixed(2), Number(item.subtotal).toFixed(2), Number(item.profit).toFixed(2)];
+        const seller = txn?.sold_by_staff_id ? (txn?.sold_by_name ?? "Cashier") : "Store Owner";
+        return [i + 1, txn?.transaction_ref ?? "—", d.toLocaleDateString("en-PH"), d.toLocaleTimeString("en-PH", { timeStyle: "short" }), seller, item.product_name, item.category, item.subcategory ?? "—", item.quantity, Number(item.unit_price).toFixed(2), Number(item.subtotal).toFixed(2), Number(item.profit).toFixed(2)];
     });
     const aoa: any[][] = [
         ["SARI-STORE — SALES REPORT"], [`Reference: ${ref}`],
@@ -306,7 +341,7 @@ async function exportSalesExcel(transactions: Transaction[], allItems: Transacti
         [`Total Sales: PHP ${totalSales.toFixed(2)}`, "", "", `Total Profit: PHP ${totalProfit.toFixed(2)}`],
         [`Transactions: ${transactions.length}`, "", "", `Date Exported: ${now.toLocaleDateString("en-PH", { dateStyle: "long" })}`],
         [],
-        ["#", "Transaction Ref", "Date", "Time", "Product Name", "Category", "Subcategory", "Qty", "Unit Price (PHP)", "Subtotal (PHP)", "Profit (PHP)"],
+        ["#", "Transaction Ref", "Date", "Time", "Sold By", "Product Name", "Category", "Subcategory", "Qty", "Unit Price (PHP)", "Subtotal (PHP)", "Profit (PHP)"],
         ...rows, [],
         ["SUMMARY"],
         ["Total Sales (PHP)", "", totalSales.toFixed(2)],
@@ -315,17 +350,17 @@ async function exportSalesExcel(transactions: Transaction[], allItems: Transacti
         ["Total Items Sold", "", allItems.reduce((s, i) => s + i.quantity, 0)],
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{ wch: 4 }, { wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 14 }, { wch: 20 }, { wch: 6 }, { wch: 16 }, { wch: 16 }, { wch: 14 }];
+    ws["!cols"] = [{ wch: 4 }, { wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 18 }, { wch: 30 }, { wch: 14 }, { wch: 20 }, { wch: 6 }, { wch: 16 }, { wch: 16 }, { wch: 14 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Sales Report");
     XLSX.writeFile(wb, `sales-${label.toLowerCase().replace(/[\s/]+/g, "-")}-${ref}.xlsx`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ── MAIN COMPONENT ─────────────────────────────────────────────────────────────
+// ── INNER VIEW ─────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export default function SalesHistoryView() {
+function SalesHistoryContent() {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [allLineItems, setAllLineItems] = useState<TransactionItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -335,6 +370,7 @@ export default function SalesHistoryView() {
     const [customTo, setCustomTo] = useState("");
     const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("All");
     const [subcategoryFilter, setSubcategoryFilter] = useState<string>("All");
+    const [sellerFilter, setSellerFilter] = useState<SellerFilter>("all");
     const [page, setPage] = useState(1);
     const [expandedTxn, setExpandedTxn] = useState<string | null>(null);
     const [detailTxn, setDetailTxn] = useState<Transaction | null>(null);
@@ -343,21 +379,11 @@ export default function SalesHistoryView() {
     const [categoryBreakdown, setCategoryBreakdown] = useState<{ category: string; sales: number; profit: number; qty: number }[]>([]);
 
     const getDateRange = useCallback((): { from: string; to: string; label: string } => {
-        const now = new Date();
-        const todayStr = now.toISOString().split("T")[0];
+        const now = new Date(); const todayStr = now.toISOString().split("T")[0];
         if (dateFilter === "today") return { from: `${todayStr}T00:00:00`, to: `${todayStr}T23:59:59`, label: `Today · ${now.toLocaleDateString("en-PH", { dateStyle: "medium" })}` };
-        if (dateFilter === "week") {
-            const start = new Date(now); start.setDate(now.getDate() - 6);
-            const startStr = start.toISOString().split("T")[0];
-            return { from: `${startStr}T00:00:00`, to: `${todayStr}T23:59:59`, label: `${start.toLocaleDateString("en-PH", { dateStyle: "medium" })} – ${now.toLocaleDateString("en-PH", { dateStyle: "medium" })}` };
-        }
-        if (dateFilter === "month") {
-            const start = new Date(now.getFullYear(), now.getMonth(), 1);
-            return { from: `${start.toISOString().split("T")[0]}T00:00:00`, to: `${todayStr}T23:59:59`, label: now.toLocaleDateString("en-PH", { month: "long", year: "numeric" }) };
-        }
-        if (dateFilter === "custom" && customFrom && customTo) {
-            return { from: `${customFrom}T00:00:00`, to: `${customTo}T23:59:59`, label: `${customFrom} to ${customTo}` };
-        }
+        if (dateFilter === "week") { const s = new Date(now); s.setDate(now.getDate() - 6); return { from: `${s.toISOString().split("T")[0]}T00:00:00`, to: `${todayStr}T23:59:59`, label: `${s.toLocaleDateString("en-PH", { dateStyle: "medium" })} – ${now.toLocaleDateString("en-PH", { dateStyle: "medium" })}` }; }
+        if (dateFilter === "month") { const s = new Date(now.getFullYear(), now.getMonth(), 1); return { from: `${s.toISOString().split("T")[0]}T00:00:00`, to: `${todayStr}T23:59:59`, label: now.toLocaleDateString("en-PH", { month: "long", year: "numeric" }) }; }
+        if (dateFilter === "custom" && customFrom && customTo) return { from: `${customFrom}T00:00:00`, to: `${customTo}T23:59:59`, label: `${customFrom} to ${customTo}` };
         return { from: `${todayStr}T00:00:00`, to: `${todayStr}T23:59:59`, label: "Today" };
     }, [dateFilter, customFrom, customTo]);
 
@@ -369,13 +395,21 @@ export default function SalesHistoryView() {
             const { from, to } = getDateRange();
 
             const { data: txnData, error: txnErr } = await supabase
-                .from("sales_transactions").select("*").eq("user_id", user.id)
-                .gte("created_at", from).lte("created_at", to).order("created_at", { ascending: false });
+                .from("sales_transactions")
+                .select("id,created_at,transaction_ref,total_amount,amount_paid,change_amount,item_count,sold_by_name,sold_by_staff_id")
+                .eq("user_id", user.id)
+                .gte("created_at", from)
+                .lte("created_at", to)
+                .order("created_at", { ascending: false });
             if (txnErr) throw txnErr;
 
-            const txnList: Transaction[] = txnData ?? [];
-            const txnIds = txnList.map(t => t.id);
+            let txnList: Transaction[] = (txnData ?? []) as Transaction[];
 
+            // Seller filter
+            if (sellerFilter === "owner") txnList = txnList.filter(t => !t.sold_by_staff_id);
+            if (sellerFilter === "cashier") txnList = txnList.filter(t => !!t.sold_by_staff_id);
+
+            const txnIds = txnList.map(t => t.id);
             if (txnIds.length === 0) {
                 setTransactions([]); setAllLineItems([]); setCategoryBreakdown([]);
                 setPage(1); setExpandedTxn(null); setExpandedItems({});
@@ -383,7 +417,7 @@ export default function SalesHistoryView() {
             }
 
             const { data: allItemsRaw } = await supabase.from("sales_transaction_items").select("*").in("transaction_id", txnIds);
-            const allItems = (allItemsRaw ?? []) as (TransactionItem & { transaction_id: string })[];
+            const allItems = (allItemsRaw ?? []) as TransactionItem[];
 
             let filteredItems = allItems;
             if (categoryFilter !== "All") {
@@ -391,24 +425,19 @@ export default function SalesHistoryView() {
                 if (categoryFilter === "Sari-Sari" && subcategoryFilter !== "All")
                     filteredItems = filteredItems.filter(i => i.subcategory === subcategoryFilter);
             }
-
-            const matchingTxnIds = new Set(filteredItems.map((i: any) => i.transaction_id));
+            const matchingTxnIds = new Set(filteredItems.map(i => (i as any).transaction_id));
             const visibleTxns = categoryFilter === "All" ? txnList : txnList.filter(t => matchingTxnIds.has(t.id));
+
             setTransactions(visibleTxns);
             setAllLineItems(allItems);
             setPage(1); setExpandedTxn(null); setExpandedItems({});
 
             const breakdown: Record<string, { sales: number; profit: number; qty: number }> = {};
-            allItems.forEach((item: any) => {
-                if (!breakdown[item.category]) breakdown[item.category] = { sales: 0, profit: 0, qty: 0 };
-                breakdown[item.category].sales += Number(item.subtotal);
-                breakdown[item.category].profit += Number(item.profit);
-                breakdown[item.category].qty += item.quantity;
-            });
+            allItems.forEach((item: any) => { if (!breakdown[item.category]) breakdown[item.category] = { sales: 0, profit: 0, qty: 0 }; breakdown[item.category].sales += Number(item.subtotal); breakdown[item.category].profit += Number(item.profit); breakdown[item.category].qty += item.quantity; });
             setCategoryBreakdown(Object.entries(breakdown).map(([category, vals]) => ({ category, ...vals })).sort((a, b) => b.sales - a.sales));
         } catch { toast.error("Failed to load transactions."); }
         finally { setLoading(false); }
-    }, [getDateRange, categoryFilter, subcategoryFilter]);
+    }, [getDateRange, categoryFilter, subcategoryFilter, sellerFilter]);
 
     useEffect(() => { fetchTransactions(); }, [fetchTransactions]);
 
@@ -418,236 +447,214 @@ export default function SalesHistoryView() {
         if (expandedItems[txnId]) return;
         setLoadingItems(prev => ({ ...prev, [txnId]: true }));
         const { data } = await supabase.from("sales_transaction_items").select("*").eq("transaction_id", txnId).order("category");
-        let items = data ?? [];
-        if (categoryFilter !== "All") {
-            items = items.filter((i: any) => i.category === categoryFilter);
-            if (categoryFilter === "Sari-Sari" && subcategoryFilter !== "All")
-                items = items.filter((i: any) => i.subcategory === subcategoryFilter);
-        }
-        setExpandedItems(prev => ({ ...prev, [txnId]: items as TransactionItem[] }));
+        let items = (data ?? []) as TransactionItem[];
+        if (categoryFilter !== "All") { items = items.filter(i => i.category === categoryFilter); if (categoryFilter === "Sari-Sari" && subcategoryFilter !== "All") items = items.filter(i => i.subcategory === subcategoryFilter); }
+        setExpandedItems(prev => ({ ...prev, [txnId]: items }));
         setLoadingItems(prev => ({ ...prev, [txnId]: false }));
     };
 
-    const filtered = transactions.filter(t => t.transaction_ref.toLowerCase().includes(search.toLowerCase()));
+    const filtered = transactions.filter(t =>
+        t.transaction_ref.toLowerCase().includes(search.toLowerCase()) ||
+        (t.sold_by_name ?? "").toLowerCase().includes(search.toLowerCase())
+    );
     const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
     const totalSales = transactions.reduce((s, t) => s + Number(t.total_amount), 0);
     const avgSale = transactions.length > 0 ? totalSales / transactions.length : 0;
-    const filteredItems = categoryFilter === "All" ? allLineItems
-        : allLineItems.filter((i: any) => i.category === categoryFilter && (categoryFilter !== "Sari-Sari" || subcategoryFilter === "All" || i.subcategory === subcategoryFilter));
+    const filteredItems = categoryFilter === "All" ? allLineItems : allLineItems.filter((i: any) => i.category === categoryFilter && (categoryFilter !== "Sari-Sari" || subcategoryFilter === "All" || i.subcategory === subcategoryFilter));
     const totalProfit = filteredItems.reduce((s, i) => s + Number(i.profit), 0);
     const { label: dateLabel } = getDateRange();
 
+    const filterLabel = categoryFilter === "All" ? "All Categories" : categoryFilter === "Sari-Sari" && subcategoryFilter !== "All" ? `${categoryFilter} › ${subcategoryFilter}` : categoryFilter;
+    const exportItems = filteredItems.map(i => ({ ...i, transaction_id: (i as any).transaction_id ?? "" }));
+
     const handleExportCSV = () => {
         if (!transactions.length) return toast.error("No data to export.");
-        const rows = [
-            ["Transaction Ref", "Date", "Time", "Total Amount", "Amount Paid", "Change", "Items"],
-            ...transactions.map(t => { const d = new Date(t.created_at); return [t.transaction_ref, d.toLocaleDateString("en-PH"), d.toLocaleTimeString("en-PH", { timeStyle: "short" }), t.total_amount.toFixed(2), t.amount_paid.toFixed(2), t.change_amount.toFixed(2), t.item_count]; }),
-        ];
+        const rows = [["Transaction Ref", "Date", "Time", "Sold By", "Total Amount", "Amount Paid", "Change", "Items"], ...transactions.map(t => { const d = new Date(t.created_at); const seller = t.sold_by_staff_id ? (t.sold_by_name ?? "Cashier") : "Store Owner"; return [t.transaction_ref, d.toLocaleDateString("en-PH"), d.toLocaleTimeString("en-PH", { timeStyle: "short" }), seller, t.total_amount.toFixed(2), t.amount_paid.toFixed(2), t.change_amount.toFixed(2), t.item_count]; })];
         const blob = new Blob([rows.map(r => r.join(",")).join("\n")], { type: "text/csv" });
         const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `sales-${Date.now()}.csv`; a.click();
         toast.success("CSV exported!");
     };
-    const handleExportPDF = () => {
-        if (!transactions.length) return toast.error("No data to export.");
-        const filterLabel = categoryFilter === "All" ? "All Categories" : categoryFilter === "Sari-Sari" && subcategoryFilter !== "All" ? `${categoryFilter} › ${subcategoryFilter}` : categoryFilter;
-        toast.promise(exportSalesPDF(transactions, filteredItems.map(i => ({ ...i, transaction_id: (i as any).transaction_id })) as any, filterLabel, dateLabel), { loading: "Generating PDF…", success: "PDF exported!", error: "Export failed." });
-    };
-    const handleExportExcel = () => {
-        if (!transactions.length) return toast.error("No data to export.");
-        const filterLabel = categoryFilter === "All" ? "All Categories" : categoryFilter === "Sari-Sari" && subcategoryFilter !== "All" ? `${categoryFilter} - ${subcategoryFilter}` : categoryFilter;
-        toast.promise(exportSalesExcel(transactions, filteredItems.map(i => ({ ...i, transaction_id: (i as any).transaction_id })) as any, filterLabel, dateLabel), { loading: "Generating Excel…", success: "Excel exported!", error: "Export failed." });
-    };
+    const handleExportPDF = () => { if (!transactions.length) return toast.error("No data to export."); toast.promise(exportSalesPDF(transactions, exportItems, filterLabel, dateLabel), { loading: "Generating PDF…", success: "PDF exported!", error: "Export failed." }); };
+    const handleExportExcel = () => { if (!transactions.length) return toast.error("No data to export."); toast.promise(exportSalesExcel(transactions, exportItems, filterLabel, dateLabel), { loading: "Generating Excel…", success: "Excel exported!", error: "Export failed." }); };
+
+    // Seller breakdown
+    const sellerBreakdown = transactions.reduce((acc, t) => {
+        const isCashier = !!t.sold_by_staff_id;
+        const key = isCashier ? (t.sold_by_name ?? "Unknown Cashier") : "Store Owner";
+        if (!acc[key]) acc[key] = { name: key, count: 0, total: 0, isCashier };
+        acc[key].count += 1; acc[key].total += Number(t.total_amount); return acc;
+    }, {} as Record<string, { name: string; count: number; total: number; isCashier: boolean }>);
+    const sellerList = Object.values(sellerBreakdown).sort((a, b) => b.total - a.total);
 
     return (
         <div className="space-y-6 pb-8">
 
-            {/* ── Page Header ── */}
+            {/* ── Header ── */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-black text-slate-900 tracking-tight">Sales History</h1>
                     <p className="text-sm text-slate-500 mt-0.5">View transactions, filter by category & date, export reports.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <button onClick={handleExportExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all active:scale-95">
-                        <FileSpreadsheet size={13} /> Excel
-                    </button>
-                    <button onClick={handleExportPDF} className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all active:scale-95">
-                        <FileText size={13} /> PDF
-                    </button>
-                    <button onClick={handleExportCSV} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all active:scale-95">
-                        <FileSpreadsheet size={13} /> CSV
-                    </button>
+                    <button onClick={handleExportExcel} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all active:scale-95"><FileSpreadsheet size={13} /> Excel</button>
+                    <button onClick={handleExportPDF} className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all active:scale-95"><FileText size={13} /> PDF</button>
+                    <button onClick={handleExportCSV} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all active:scale-95"><FileSpreadsheet size={13} /> CSV</button>
                 </div>
             </div>
 
-            {/* ── Filters Panel ── */}
+            {/* ── Filters ── */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                {/* Date Row */}
+
+                {/* Date */}
                 <div className="p-4 border-b border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
-                        <Calendar size={10} /> Date Range
-                    </p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5"><Calendar size={10} /> Date Range</p>
                     <div className="flex flex-wrap gap-2">
                         {(["today", "week", "month", "custom"] as DateFilter[]).map(f => (
-                            <button key={f} onClick={() => setDateFilter(f)}
-                                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${dateFilter === f
-                                    ? "bg-slate-900 text-white shadow-sm"
-                                    : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                                    }`}>
+                            <button key={f} onClick={() => setDateFilter(f)} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${dateFilter === f ? "bg-slate-900 text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
                                 {f === "today" ? "Today" : f === "week" ? "This Week" : f === "month" ? "This Month" : "Custom"}
                             </button>
                         ))}
                     </div>
                     {dateFilter === "custom" && (
                         <div className="flex flex-wrap gap-3 items-center mt-3">
-                            {[["From", customFrom, setCustomFrom], ["To", customTo, setCustomTo]].map(([lbl, val, set]) => (
-                                <div key={lbl as string} className="flex items-center gap-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{lbl as string}</label>
-                                    <input type="date" value={val as string} onChange={e => (set as any)(e.target.value)}
-                                        className="px-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 outline-none focus:ring-2 ring-blue-500" />
+                            {([["From", customFrom, setCustomFrom], ["To", customTo, setCustomTo]] as [string, string, (v: string) => void][]).map(([lbl, val, set]) => (
+                                <div key={lbl} className="flex items-center gap-2">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{lbl}</label>
+                                    <input type="date" value={val} onChange={e => set(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 outline-none focus:ring-2 ring-blue-500" />
                                 </div>
                             ))}
-                            <button onClick={fetchTransactions} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-black hover:bg-blue-700 transition-colors">
-                                Apply
-                            </button>
+                            <button onClick={fetchTransactions} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-black hover:bg-blue-700 transition-colors">Apply</button>
                         </div>
                     )}
                 </div>
 
-                {/* Category Row */}
-                <div className="p-4">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
-                        <Filter size={10} /> Category
-                    </p>
+                {/* Category */}
+                <div className="p-4 border-b border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5"><Filter size={10} /> Category</p>
                     <div className="flex flex-wrap gap-2">
                         {(["All", "Almusal", "Sari-Sari", "Meryenda"] as CategoryFilter[]).map(cat => {
-                            const cs = CAT_STYLE[cat];
-                            const Icon = cs.icon;
-                            const active = categoryFilter === cat;
-                            return (
-                                <button key={cat}
-                                    onClick={() => { setCategoryFilter(cat); setSubcategoryFilter("All"); }}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border ${active
-                                        ? `${cs.activeBg} text-white border-transparent shadow-sm`
-                                        : `${cs.bg} ${cs.text} ${cs.border} hover:opacity-80`
-                                        }`}>
-                                    <Icon size={12} /> {cat}
-                                </button>
-                            );
+                            const cs = CAT_STYLE[cat]; const Icon = cs.icon; const active = categoryFilter === cat;
+                            return (<button key={cat} onClick={() => { setCategoryFilter(cat); setSubcategoryFilter("All"); }} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border ${active ? `${cs.activeBg} text-white border-transparent shadow-sm` : `${cs.bg} ${cs.text} ${cs.border} hover:opacity-80`}`}><Icon size={12} />{cat}</button>);
                         })}
                     </div>
-
-                    {/* Sari-Sari subcategory */}
                     {categoryFilter === "Sari-Sari" && (
                         <div className="mt-3 pt-3 border-t border-slate-100">
-                            <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-1">
-                                <Tag size={9} /> Subcategory
-                            </p>
+                            <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-1"><Tag size={9} /> Subcategory</p>
                             <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
-                                <button onClick={() => setSubcategoryFilter("All")}
-                                    className={`px-3 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all border ${subcategoryFilter === "All" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}>
-                                    All
-                                </button>
-                                {SARI_SARI_SUBCATEGORIES.map(sub => (
-                                    <button key={sub} onClick={() => setSubcategoryFilter(sub)}
-                                        className={`px-3 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all border ${subcategoryFilter === sub ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}>
-                                        {sub}
-                                    </button>
-                                ))}
+                                <button onClick={() => setSubcategoryFilter("All")} className={`px-3 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all border ${subcategoryFilter === "All" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}>All</button>
+                                {SARI_SARI_SUBCATEGORIES.map(sub => (<button key={sub} onClick={() => setSubcategoryFilter(sub)} className={`px-3 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all border ${subcategoryFilter === sub ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}>{sub}</button>))}
                             </div>
                         </div>
                     )}
                 </div>
 
-                {/* Active filter bar */}
-                <div className="bg-slate-50 px-4 py-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                {/* Seller filter — NEW */}
+                <div className="p-4 border-b border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5"><User size={10} /> Sold By</p>
+                    <div className="flex flex-wrap gap-2">
+                        {([{ id: "all", label: "All Sales", icon: <Package size={12} />, cls: "bg-slate-900 text-white" }, { id: "owner", label: "Owner Only", icon: <User size={12} />, cls: "bg-violet-600 text-white" }, { id: "cashier", label: "Cashier Only", icon: <UserCheck size={12} />, cls: "bg-cyan-600 text-white" }] as { id: SellerFilter; label: string; icon: React.ReactNode; cls: string }[])
+                            .map(f => (<button key={f.id} onClick={() => setSellerFilter(f.id)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border ${sellerFilter === f.id ? `${f.cls} border-transparent shadow-sm` : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"}`}>{f.icon}{f.label}</button>))}
+                    </div>
+                </div>
+
+                {/* Active filters bar */}
+                <div className="bg-slate-50 px-4 py-2.5 flex flex-wrap items-center gap-2">
                     <span className="text-[10px] font-bold text-slate-400">Showing:</span>
                     <span className="bg-white border border-slate-200 text-slate-700 text-[10px] font-black px-2.5 py-1 rounded-full">{dateLabel}</span>
-                    {categoryFilter !== "All" && (
-                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${CAT_STYLE[categoryFilter].bg} ${CAT_STYLE[categoryFilter].text} ${CAT_STYLE[categoryFilter].border}`}>
-                            {categoryFilter}
-                        </span>
-                    )}
-                    {categoryFilter === "Sari-Sari" && subcategoryFilter !== "All" && (
-                        <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-black px-2.5 py-1 rounded-full">{subcategoryFilter}</span>
-                    )}
+                    {categoryFilter !== "All" && <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${CAT_STYLE[categoryFilter].bg} ${CAT_STYLE[categoryFilter].text} ${CAT_STYLE[categoryFilter].border}`}>{categoryFilter}</span>}
+                    {categoryFilter === "Sari-Sari" && subcategoryFilter !== "All" && <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-black px-2.5 py-1 rounded-full">{subcategoryFilter}</span>}
+                    {sellerFilter !== "all" && <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${sellerFilter === "cashier" ? "bg-cyan-50 text-cyan-700 border-cyan-200" : "bg-violet-50 text-violet-700 border-violet-200"}`}>{sellerFilter === "cashier" ? "Cashier Only" : "Owner Only"}</span>}
                     <span className="ml-auto text-[10px] font-bold text-slate-400">{transactions.length} transaction{transactions.length !== 1 ? "s" : ""}</span>
                 </div>
             </div>
 
-            {/* ── Stat Cards ── */}
+            {/* ── Stats ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <StatCard icon={DollarSign} label="Total Sales" value={php(totalSales)} sub="revenue collected"
-                    color={{ bg: "bg-emerald-100", icon: "text-emerald-600", text: "text-emerald-700" }} />
-                <StatCard icon={TrendingUp} label="Total Profit" value={php(totalProfit)} sub="net earned"
-                    color={{ bg: "bg-blue-100", icon: "text-blue-600", text: "text-blue-700" }} />
-                <StatCard icon={Receipt} label="Transactions" value={String(transactions.length)} sub="completed orders"
-                    color={{ bg: "bg-violet-100", icon: "text-violet-600", text: "text-violet-700" }} />
-                <StatCard icon={ShoppingBag} label="Avg. Sale" value={php(avgSale)} sub="per transaction"
-                    color={{ bg: "bg-amber-100", icon: "text-amber-600", text: "text-amber-700" }} />
+                <StatCard icon={DollarSign} label="Total Sales" value={php(totalSales)} sub="revenue collected" color={{ bg: "bg-emerald-100", icon: "text-emerald-600", text: "text-emerald-700" }} />
+                <StatCard icon={TrendingUp} label="Total Profit" value={php(totalProfit)} sub="net earned" color={{ bg: "bg-blue-100", icon: "text-blue-600", text: "text-blue-700" }} />
+                <StatCard icon={Receipt} label="Transactions" value={String(transactions.length)} sub="completed orders" color={{ bg: "bg-violet-100", icon: "text-violet-600", text: "text-violet-700" }} />
+                <StatCard icon={ShoppingBag} label="Avg. Sale" value={php(avgSale)} sub="per transaction" color={{ bg: "bg-amber-100", icon: "text-amber-600", text: "text-amber-700" }} />
             </div>
 
-            {/* ── Category Breakdown ── */}
-            {categoryFilter === "All" && categoryBreakdown.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {categoryBreakdown.map(cat => {
-                        const style = CAT_STYLE[cat.category] ?? CAT_STYLE.All;
-                        const CatIcon = style.icon;
-                        const totalCatSales = categoryBreakdown.reduce((s, c) => s + c.sales, 0);
-                        const pct = totalCatSales > 0 ? (cat.sales / totalCatSales * 100).toFixed(0) : "0";
-                        return (
-                            <div key={cat.category} className={`bg-white rounded-2xl border ${style.border} p-5 shadow-sm`}>
-                                <div className="flex items-center gap-3 mb-4">
-                                    <div className={`w-11 h-11 rounded-2xl ${style.bg} flex items-center justify-center`}>
-                                        <CatIcon size={20} className={style.text} />
+            {/* ── Category + Seller breakdown ── */}
+            {!loading && transactions.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    {/* Category cards */}
+                    {categoryFilter === "All" && categoryBreakdown.length > 0 && (
+                        <div className={`${sellerList.length > 0 ? "lg:col-span-2" : "lg:col-span-3"} grid grid-cols-1 sm:grid-cols-${Math.min(categoryBreakdown.length, 3)} gap-3`}>
+                            {categoryBreakdown.map(cat => {
+                                const style = CAT_STYLE[cat.category] ?? CAT_STYLE.All; const CatIcon = style.icon;
+                                const totalCatSales = categoryBreakdown.reduce((s, c) => s + c.sales, 0);
+                                const pct = totalCatSales > 0 ? (cat.sales / totalCatSales * 100).toFixed(0) : "0";
+                                return (
+                                    <div key={cat.category} className={`bg-white rounded-2xl border ${style.border} p-5 shadow-sm`}>
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <div className={`w-11 h-11 rounded-2xl ${style.bg} flex items-center justify-center`}><CatIcon size={20} className={style.text} /></div>
+                                            <div className="flex-1"><p className={`text-sm font-black ${style.text}`}>{cat.category}</p><p className="text-[10px] text-slate-400 font-medium">{cat.qty} items · {pct}% of sales</p></div>
+                                        </div>
+                                        <div className="w-full bg-slate-100 rounded-full h-1.5 mb-3"><div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: style.fill }} /></div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="bg-slate-50 rounded-xl p-3"><p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Sales</p><p className="text-sm font-black text-slate-800">{php(cat.sales)}</p></div>
+                                            <div className={`rounded-xl p-3 ${cat.profit >= 0 ? "bg-emerald-50" : "bg-red-50"}`}><p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Profit</p><p className={`text-sm font-black ${cat.profit >= 0 ? "text-emerald-700" : "text-red-600"}`}>{php(cat.profit)}</p></div>
+                                        </div>
                                     </div>
-                                    <div className="flex-1">
-                                        <p className={`text-sm font-black ${style.text}`}>{cat.category}</p>
-                                        <p className="text-[10px] text-slate-400 font-medium">{cat.qty} items · {pct}% of sales</p>
-                                    </div>
-                                </div>
-                                {/* Progress bar */}
-                                <div className="w-full bg-slate-100 rounded-full h-1.5 mb-3">
-                                    <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: style.fill }} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="bg-slate-50 rounded-xl p-3">
-                                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Sales</p>
-                                        <p className="text-sm font-black text-slate-800">{php(cat.sales)}</p>
-                                    </div>
-                                    <div className={`rounded-xl p-3 ${cat.profit >= 0 ? "bg-emerald-50" : "bg-red-50"}`}>
-                                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Profit</p>
-                                        <p className={`text-sm font-black ${cat.profit >= 0 ? "text-emerald-700" : "text-red-600"}`}>{php(cat.profit)}</p>
-                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* Seller breakdown */}
+                    {sellerList.length > 0 && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                            <div className="flex items-center gap-2 mb-4">
+                                <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center"><UserCheck size={14} className="text-slate-600" /></div>
+                                <div><h3 className="text-sm font-black text-slate-800">Sold By</h3><p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Cashier / Owner</p></div>
+                            </div>
+                            <div className="space-y-3">
+                                {sellerList.map(s => {
+                                    const pct = totalSales > 0 ? (s.total / totalSales * 100) : 0;
+                                    return (
+                                        <div key={s.name}>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[8px] font-black text-white flex-shrink-0 ${s.isCashier ? "bg-cyan-500" : "bg-violet-600"}`}>{s.isCashier ? "C" : "O"}</div>
+                                                    <span className="text-[11px] font-bold text-slate-700 truncate max-w-[120px]">{s.name}</span>
+                                                </div>
+                                                <span className="text-[10px] font-black text-slate-800 shrink-0">{php(s.total)}</span>
+                                            </div>
+                                            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${s.isCashier ? "bg-cyan-400" : "bg-violet-500"}`} style={{ width: `${pct}%` }} /></div>
+                                            <div className="flex justify-between mt-0.5"><span className="text-[9px] text-slate-400">{s.count} order{s.count !== 1 ? "s" : ""}</span><span className="text-[9px] text-slate-400">{pct.toFixed(0)}%</span></div>
+                                        </div>
+                                    );
+                                })}
+                                <div className="flex gap-3 pt-2 border-t border-slate-100">
+                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-violet-500" /><span className="text-[9px] text-slate-400 font-bold">Owner</span></div>
+                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-cyan-400" /><span className="text-[9px] text-slate-400 font-bold">Cashier</span></div>
                                 </div>
                             </div>
-                        );
-                    })}
+                        </div>
+                    )}
                 </div>
             )}
 
-            {/* ── Transaction List ── */}
+            {/* ── Transaction list ── */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                {/* List header */}
-                <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 flex-wrap">
                     <div className="relative flex-1 max-w-sm">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                        <input type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-                            placeholder="Search transaction ref…"
+                        <input type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Search ref or seller name…"
                             className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 ring-blue-500 focus:bg-white transition-colors" />
                     </div>
-                    <p className="text-xs font-bold text-slate-400 ml-auto shrink-0">
-                        {filtered.length} result{filtered.length !== 1 ? "s" : ""}
-                    </p>
+                    <p className="text-xs font-bold text-slate-400 ml-auto shrink-0">{filtered.length} result{filtered.length !== 1 ? "s" : ""}</p>
                 </div>
 
-                {/* Column headers */}
                 {!loading && paginated.length > 0 && (
-                    <div className="hidden sm:grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-100">
+                    <div className="hidden sm:grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-100">
                         <div className="w-7" />
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Transaction</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sold By</p>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center w-12">Items</p>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Total</p>
                         <div className="w-9" />
@@ -661,61 +668,43 @@ export default function SalesHistoryView() {
                     </div>
                 ) : paginated.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-                        <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-3">
-                            <Receipt size={28} className="opacity-30" />
-                        </div>
+                        <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-3"><Receipt size={28} className="opacity-30" /></div>
                         <p className="text-sm font-bold">No transactions found</p>
                         <p className="text-xs mt-1 text-slate-300">Try a different date range or filter</p>
                     </div>
                 ) : (
                     <div className="divide-y divide-slate-50">
                         {paginated.map(txn => {
-                            const d = new Date(txn.created_at);
-                            const isExpanded = expandedTxn === txn.id;
-                            const txnItems = expandedItems[txn.id] ?? [];
-
+                            const d = new Date(txn.created_at); const isExpanded = expandedTxn === txn.id; const txnItems = expandedItems[txn.id] ?? [];
                             return (
                                 <div key={txn.id}>
-                                    <div className={`grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 items-center px-5 py-4 hover:bg-slate-50 transition-colors ${isExpanded ? "bg-blue-50/40" : ""}`}>
-                                        <button onClick={() => toggleExpand(txn.id)}
-                                            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all shrink-0 ${isExpanded ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-400 hover:bg-blue-100 hover:text-blue-600"}`}>
+                                    <div className={`grid grid-cols-[auto_1fr_auto_auto_auto] sm:grid-cols-[auto_1fr_auto_auto_auto_auto] gap-4 items-center px-5 py-4 hover:bg-slate-50 transition-colors ${isExpanded ? "bg-blue-50/40" : ""}`}>
+                                        <button onClick={() => toggleExpand(txn.id)} className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all shrink-0 ${isExpanded ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-400 hover:bg-blue-100 hover:text-blue-600"}`}>
                                             {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                                         </button>
-
                                         <div className="min-w-0">
                                             <p className="text-sm font-black text-slate-800">{txn.transaction_ref}</p>
-                                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-                                                {d.toLocaleDateString("en-PH", { dateStyle: "medium" })} · {d.toLocaleTimeString("en-PH", { timeStyle: "short" })}
-                                            </p>
+                                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">{d.toLocaleDateString("en-PH", { dateStyle: "medium" })} · {d.toLocaleTimeString("en-PH", { timeStyle: "short" })}</p>
                                         </div>
-
+                                        {/* Sold By badge */}
+                                        <div className="hidden sm:block shrink-0">
+                                            <SellerBadge soldByName={txn.sold_by_name} soldByStaffId={txn.sold_by_staff_id} small />
+                                        </div>
                                         <div className="text-center w-12 shrink-0">
-                                            <span className="inline-flex items-center justify-center w-7 h-7 bg-slate-100 rounded-lg text-xs font-black text-slate-600">
-                                                {txn.item_count}
-                                            </span>
+                                            <span className="inline-flex items-center justify-center w-7 h-7 bg-slate-100 rounded-lg text-xs font-black text-slate-600">{txn.item_count}</span>
                                         </div>
-
                                         <div className="text-right shrink-0">
                                             <p className="text-sm font-black text-slate-900">{php(txn.total_amount)}</p>
-                                            <p className="text-[10px] text-slate-400 font-medium flex items-center justify-end gap-0.5">
-                                                <Banknote size={9} /> {php(txn.change_amount)} change
-                                            </p>
+                                            <p className="text-[10px] text-slate-400 font-medium flex items-center justify-end gap-0.5"><Banknote size={9} />{php(txn.change_amount)} change</p>
                                         </div>
-
-                                        <button onClick={() => setDetailTxn(txn)}
-                                            className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all shrink-0">
+                                        <button onClick={() => setDetailTxn(txn)} className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all shrink-0">
                                             <Eye size={15} />
                                         </button>
                                     </div>
-
-                                    {/* Expanded items */}
                                     {isExpanded && (
                                         <div className="bg-blue-50/30 px-5 pb-4 pt-1">
                                             {loadingItems[txn.id] ? (
-                                                <div className="flex items-center gap-2 py-4 text-slate-400">
-                                                    <Loader2 size={13} className="animate-spin" />
-                                                    <span className="text-xs font-medium">Loading items…</span>
-                                                </div>
+                                                <div className="flex items-center gap-2 py-4 text-slate-400"><Loader2 size={13} className="animate-spin" /><span className="text-xs font-medium">Loading items…</span></div>
                                             ) : txnItems.length === 0 ? (
                                                 <p className="text-xs text-slate-400 py-3">No items match current filter.</p>
                                             ) : (
@@ -724,32 +713,18 @@ export default function SalesHistoryView() {
                                                         const cs = CAT_STYLE[item.category] ?? CAT_STYLE.All;
                                                         return (
                                                             <div key={item.id} className="flex items-center gap-3 bg-white rounded-xl px-4 py-2.5 border border-slate-100 shadow-sm">
-                                                                <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${cs.bg} ${cs.text} shrink-0`}>
-                                                                    {item.category}
-                                                                </span>
+                                                                <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${cs.bg} ${cs.text} shrink-0`}>{item.category}</span>
                                                                 <p className="text-xs font-bold text-slate-700 flex-1 truncate">{item.product_name}</p>
-                                                                {item.subcategory && (
-                                                                    <p className="text-[9px] text-slate-400 hidden md:flex items-center gap-1 shrink-0">
-                                                                        <Tag size={7} /> {item.subcategory}
-                                                                    </p>
-                                                                )}
-                                                                <p className="text-[10px] text-slate-500 shrink-0">
-                                                                    <span className="font-black text-slate-700">{item.quantity}</span> × {php(item.unit_price)}
-                                                                </p>
+                                                                {item.subcategory && <p className="text-[9px] text-slate-400 hidden md:flex items-center gap-1 shrink-0"><Tag size={7} />{item.subcategory}</p>}
+                                                                <p className="text-[10px] text-slate-500 shrink-0"><span className="font-black text-slate-700">{item.quantity}</span> × {php(item.unit_price)}</p>
                                                                 <p className="text-xs font-black text-slate-900 shrink-0">{php(item.subtotal)}</p>
-                                                                <p className={`text-[9px] font-black shrink-0 ${item.profit >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                                                                    +{php(item.profit)}
-                                                                </p>
+                                                                <p className={`text-[9px] font-black shrink-0 ${item.profit >= 0 ? "text-emerald-600" : "text-red-500"}`}>+{php(item.profit)}</p>
                                                             </div>
                                                         );
                                                     })}
                                                     <div className="flex justify-end pt-1">
                                                         <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2 text-right">
-                                                            <p className="text-[10px] text-emerald-600 font-bold">
-                                                                Subtotal <span className="font-black text-emerald-800">{php(txnItems.reduce((s, i) => s + Number(i.subtotal), 0))}</span>
-                                                                <span className="mx-2 text-emerald-300">·</span>
-                                                                Profit <span className="font-black text-emerald-800">{php(txnItems.reduce((s, i) => s + Number(i.profit), 0))}</span>
-                                                            </p>
+                                                            <p className="text-[10px] text-emerald-600 font-bold">Subtotal <span className="font-black text-emerald-800">{php(txnItems.reduce((s, i) => s + Number(i.subtotal), 0))}</span><span className="mx-2 text-emerald-300">·</span>Profit <span className="font-black text-emerald-800">{php(txnItems.reduce((s, i) => s + Number(i.profit), 0))}</span></p>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -762,23 +737,13 @@ export default function SalesHistoryView() {
                     </div>
                 )}
 
-                {/* Pagination */}
                 {!loading && filtered.length > PAGE_SIZE && (
                     <div className="flex items-center justify-between px-5 py-4 border-t border-slate-100 bg-slate-50/50">
-                        <p className="text-xs font-bold text-slate-400">
-                            {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
-                        </p>
+                        <p className="text-xs font-bold text-slate-400">{Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}</p>
                         <div className="flex items-center gap-1">
-                            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                                className="p-2 rounded-xl hover:bg-slate-200 disabled:opacity-30 transition-colors"><ChevronLeft size={14} /></button>
-                            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map(p => (
-                                <button key={p} onClick={() => setPage(p)}
-                                    className={`w-8 h-8 rounded-xl text-xs font-black transition-all ${p === page ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-200"}`}>
-                                    {p}
-                                </button>
-                            ))}
-                            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                                className="p-2 rounded-xl hover:bg-slate-200 disabled:opacity-30 transition-colors"><ChevronRight size={14} /></button>
+                            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-2 rounded-xl hover:bg-slate-200 disabled:opacity-30 transition-colors"><ChevronLeft size={14} /></button>
+                            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map(p => (<button key={p} onClick={() => setPage(p)} className={`w-8 h-8 rounded-xl text-xs font-black transition-all ${p === page ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-200"}`}>{p}</button>))}
+                            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-2 rounded-xl hover:bg-slate-200 disabled:opacity-30 transition-colors"><ChevronRight size={14} /></button>
                         </div>
                     </div>
                 )}
@@ -786,5 +751,21 @@ export default function SalesHistoryView() {
 
             {detailTxn && <TransactionDetailModal txn={detailTxn} onClose={() => setDetailTxn(null)} />}
         </div>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── DEFAULT EXPORT ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export default function SalesHistoryView() {
+    return (
+        <SecurePageGate
+            pageName="Sales History"
+            pageIcon={<Receipt size={28} className="text-slate-700" />}
+            gradientStyle={{ background: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)" }}
+        >
+            <SalesHistoryContent />
+        </SecurePageGate>
     );
 }

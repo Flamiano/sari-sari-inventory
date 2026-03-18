@@ -4,19 +4,19 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import {
     LayoutDashboard, Package, Users, ShoppingCart,
-    BarChart3, History, X, Settings, ChevronRight, Quote,
+    BarChart3, History, X, ChevronRight, Zap,
+    UserRound,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { supabase } from "@/app/utils/supabase";
 
-// Types
 interface NavItem {
     id: string;
     label: string;
     sublabel: string;
     icon: React.ElementType;
     accent: string;
-    accentBg: string;
-    accentText: string;
+    accentRgb: string;
     badge?: string;
 }
 
@@ -24,325 +24,628 @@ interface SidebarProps {
     activeTab: string;
     setActiveTab: (id: string) => void;
     closeMobile: () => void;
-    // Pass true only after client has mounted & restored sessionStorage tab.
-    // Prevents SSR→client hydration mismatch on active-item styles.
     mounted?: boolean;
 }
 
-// Nav items
 const NAV: NavItem[] = [
     {
         id: "dashboard",
         label: "Overview",
-        sublabel: "Store summary",
+        sublabel: "Store at a glance",
         icon: LayoutDashboard,
-        accent: "from-blue-500 to-indigo-500",
-        accentBg: "bg-blue-500/10",
-        accentText: "text-blue-500",
+        accent: "#3b82f6",
+        accentRgb: "59,130,246",
     },
     {
         id: "products",
         label: "Inventory",
-        sublabel: "Stock management",
+        sublabel: "Manage your stocks",
         icon: Package,
-        accent: "from-violet-500 to-fuchsia-600",
-        accentBg: "bg-violet-500/10",
-        accentText: "text-violet-500",
+        accent: "#8b5cf6",
+        accentRgb: "139,92,246",
         badge: "New",
-    },
-    {
-        id: "suppliers",
-        label: "Suppliers",
-        sublabel: "Vendor relations",
-        icon: Users,
-        accent: "from-emerald-500 to-teal-500",
-        accentBg: "bg-emerald-500/10",
-        accentText: "text-emerald-500",
     },
     {
         id: "pos",
         label: "Point of Sale",
-        sublabel: "Quick checkout",
+        sublabel: "Process transactions",
         icon: ShoppingCart,
-        accent: "from-orange-400 to-red-500",
-        accentBg: "bg-orange-500/10",
-        accentText: "text-orange-500",
+        accent: "#f59e0b",
+        accentRgb: "245,158,11",
+    },
+    {
+        id: "suppliers",
+        label: "Suppliers",
+        sublabel: "Vendor directory",
+        icon: Users,
+        accent: "#10b981",
+        accentRgb: "16,185,129",
     },
     {
         id: "sales",
         label: "Sales History",
-        sublabel: "Past transactions",
+        sublabel: "All transactions",
         icon: History,
-        accent: "from-rose-500 to-pink-600",
-        accentBg: "bg-rose-500/10",
-        accentText: "text-rose-500",
+        accent: "#f43f5e",
+        accentRgb: "244,63,94",
     },
     {
         id: "reports",
         label: "Analytics",
-        sublabel: "Performance metrics",
+        sublabel: "Reports & insights",
         icon: BarChart3,
-        accent: "from-cyan-500 to-blue-600",
-        accentBg: "bg-cyan-500/10",
-        accentText: "text-cyan-500",
+        accent: "#06b6d4",
+        accentRgb: "6,182,212",
+    },
+    {
+        id: "staffs",
+        label: "Staff Management",
+        sublabel: "Staff members",
+        icon: UserRound,
+        accent: "#6366f1",
+        accentRgb: "99,102,241",
     },
 ];
 
-const QUOTES = [
-    "Small coins build big dreams.",
-    "Quality service, neighborhood trust.",
-    "Stock smart, sell fast.",
-    "Patience is the key to profit.",
-    "Success is in the daily inventory.",
-];
-
 export default function Sidebar({ activeTab, setActiveTab, closeMobile, mounted = true }: SidebarProps) {
-    const [quoteIndex, setQuoteIndex] = useState(0);
+    const [userEmail, setUserEmail] = useState<string | null>(null);
+    const [storeName, setStoreName] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [hoveredId, setHoveredId] = useState<string | null>(null);
 
     useEffect(() => {
-        const t = setInterval(() => setQuoteIndex(i => (i + 1) % QUOTES.length), 10000);
-        return () => clearInterval(t);
+        const getProfile = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { setLoading(false); return; }
+
+            const { data: profile } = await supabase
+                .from("profiles")
+                .select("store_name, email")
+                .eq("id", user.id)
+                .single();
+
+            if (profile) {
+                setStoreName(profile.store_name ?? null);
+                setUserEmail(profile.email ?? user.email ?? null);
+            } else {
+                setUserEmail(user.email ?? null);
+            }
+            setLoading(false);
+        };
+        getProfile();
     }, []);
 
+    const initials = storeName
+        ? storeName.split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase()
+        : userEmail
+            ? userEmail.slice(0, 2).toUpperCase()
+            : "SS";
+
+    const activeItem = NAV.find(n => n.id === activeTab);
+
     return (
-        <aside
-            className="w-72 h-full flex flex-col relative overflow-hidden"
-            style={{
-                background: "linear-gradient(180deg, #080d14 0%, #0d1520 50%, #080d14 100%)",
-                borderRight: "1px solid rgba(255,255,255,0.05)",
-            }}
-        >
-            {/* Ambient glow */}
-            <div
-                className="absolute top-0 left-1/2 -translate-x-1/2 w-56 h-56 rounded-full pointer-events-none"
-                style={{
-                    background: "radial-gradient(circle, rgba(37,99,235,0.12) 0%, transparent 70%)",
-                    filter: "blur(20px)",
-                }}
-            />
+        <>
+            <style>{`
+                @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:wght@300;400;500;600&display=swap');
 
-            {/* Branding */}
-            <div className="relative px-5 pt-6 pb-5 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div
-                        className="relative w-11 h-11 rounded-2xl overflow-hidden flex-shrink-0"
-                        style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.08), 0 4px 16px rgba(37,99,235,0.3)" }}
-                    >
-                        <Image
-                            src="/images/logo.png"
-                            alt="Logo"
-                            fill
-                            className="object-cover"
-                            onError={e => {
-                                const t = e.currentTarget as HTMLImageElement;
-                                t.style.display = "none";
-                                const p = t.parentElement;
-                                if (p) {
-                                    p.style.background = "linear-gradient(135deg, #2563eb, #7c3aed)";
-                                    p.innerHTML = `<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:1.1rem;">M</span>`;
-                                }
-                            }}
-                        />
-                    </div>
-                    <div className="flex flex-col leading-none">
-                        <span className="text-white font-black tracking-tight text-base uppercase">
-                            Marilyn&apos;s
-                        </span>
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <span
-                                className="text-[0.55rem] font-black uppercase tracking-[0.18em] px-1.5 py-0.5 rounded-md"
-                                style={{
-                                    background: "linear-gradient(90deg, rgba(37,99,235,0.2), rgba(124,58,237,0.2))",
-                                    border: "1px solid rgba(99,102,241,0.25)",
-                                    color: "#818cf8",
-                                }}
-                            >
-                                Retail Pro
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                <button
-                    onClick={closeMobile}
-                    className="md:hidden w-8 h-8 flex items-center justify-center rounded-xl text-slate-500 hover:text-white transition-colors"
-                    style={{ background: "rgba(255,255,255,0.05)" }}
-                >
-                    <X size={16} />
-                </button>
-            </div>
+                @keyframes spin { to { transform: rotate(360deg); } }
+                @keyframes ping {
+                    0%, 100% { transform: scale(1); opacity: 0.7; }
+                    60% { transform: scale(2); opacity: 0; }
+                }
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.4; }
+                }
+                @keyframes shimmer {
+                    0% { background-position: -200% center; }
+                    100% { background-position: 200% center; }
+                }
+                @keyframes float {
+                    0%, 100% { transform: translateY(0px); }
+                    50% { transform: translateY(-3px); }
+                }
 
-            {/* Separator */}
-            <div
-                className="mx-5 mb-5"
-                style={{ height: "1px", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)" }}
-            />
+                .sidebar-root {
+                    font-family: 'DM Sans', sans-serif;
+                    width: 100%;
+                    height: 100vh;
+                    display: flex;
+                    flex-direction: column;
+                    background: #07090f;
+                    border-right: 1px solid rgba(255,255,255,0.06);
+                    position: relative;
+                    overflow: hidden;
+                    box-sizing: border-box;
+                }
 
-            <p className="px-5 text-[0.58rem] font-black uppercase tracking-[0.22em] text-slate-600 mb-2">
-                Navigation
-            </p>
+                /* Ambient glow blobs */
+                .sidebar-root::before {
+                    content: '';
+                    position: absolute;
+                    top: -60px;
+                    left: -60px;
+                    width: 200px;
+                    height: 200px;
+                    background: radial-gradient(circle, rgba(59,130,246,0.07) 0%, transparent 70%);
+                    pointer-events: none;
+                    z-index: 0;
+                }
+                .sidebar-root::after {
+                    content: '';
+                    position: absolute;
+                    bottom: 80px;
+                    right: -40px;
+                    width: 160px;
+                    height: 160px;
+                    background: radial-gradient(circle, rgba(139,92,246,0.06) 0%, transparent 70%);
+                    pointer-events: none;
+                    z-index: 0;
+                }
 
-            {/* Nav */}
-            <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto scrollbar-none">
-                {NAV.map(item => {
-                    const Icon = item.icon;
-                    // Only apply active styles after client has mounted to prevent hydration mismatch
-                    const isActive = mounted && activeTab === item.id;
+                .sidebar-inner {
+                    position: relative;
+                    z-index: 1;
+                    display: flex;
+                    flex-direction: column;
+                    height: 100%;
+                }
 
-                    return (
-                        <button
-                            key={item.id}
-                            onClick={() => {
-                                setActiveTab(item.id);
-                                if (typeof window !== "undefined" && window.innerWidth < 768) closeMobile();
-                            }}
-                            className="w-full group relative flex items-center gap-3 px-3 py-3 rounded-2xl transition-all duration-200 outline-none"
-                            // Use suppressHydrationWarning so React doesn't throw on style mismatch
-                            suppressHydrationWarning
-                            style={
-                                isActive
-                                    ? {
-                                        background: "linear-gradient(135deg, rgba(37,99,235,0.15), rgba(124,58,237,0.08))",
-                                        border: "1px solid rgba(99,102,241,0.2)",
-                                    }
-                                    : { border: "1px solid transparent" }
-                            }
-                        >
-                            {/* Active left bar */}
-                            <AnimatePresence>
-                                {isActive && (
-                                    <motion.span
-                                        layoutId="navBar"
-                                        className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 rounded-r-full bg-gradient-to-b ${item.accent}`}
-                                        transition={{ type: "spring", stiffness: 400, damping: 32 }}
-                                    />
-                                )}
-                            </AnimatePresence>
+                /* Brand */
+                .brand-area {
+                    padding: 22px 16px 0;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-shrink: 0;
+                }
 
-                            {/* Icon */}
-                            <div
-                                className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200 ${isActive ? item.accentBg : "bg-slate-800/40 group-hover:bg-slate-700/40"
-                                    }`}
-                            >
-                                <Icon
-                                    size={17}
-                                    className={
-                                        isActive
-                                            ? item.accentText
-                                            : "text-slate-500 group-hover:text-slate-300 transition-colors"
-                                    }
-                                />
-                            </div>
+                .logo-ring {
+                    width: 38px;
+                    height: 38px;
+                    border-radius: 11px;
+                    overflow: hidden;
+                    flex-shrink: 0;
+                    position: relative;
+                    background: linear-gradient(135deg, #1d4ed8, #6d28d9);
+                    box-shadow: 0 0 0 1px rgba(255,255,255,0.08),
+                                0 4px 16px rgba(37,99,235,0.35),
+                                inset 0 1px 0 rgba(255,255,255,0.12);
+                }
 
-                            {/* Labels */}
-                            <div className="flex-1 min-w-0 text-left">
-                                <p
-                                    className={`text-[0.82rem] font-bold leading-none transition-colors ${isActive ? "text-white" : "text-slate-400 group-hover:text-slate-200"
-                                        }`}
-                                >
-                                    {item.label}
-                                </p>
-                                <p className="text-[0.62rem] text-slate-600 mt-0.5 font-medium group-hover:text-slate-500 transition-colors">
-                                    {item.sublabel}
-                                </p>
-                            </div>
+                .brand-text-main {
+                    font-family: 'Syne', sans-serif;
+                    font-weight: 900;
+                    font-size: 0.92rem;
+                    color: #f8fafc;
+                    letter-spacing: -0.03em;
+                    line-height: 1;
+                }
 
-                            {/* Badge or chevron */}
-                            {item.badge ? (
-                                <span
-                                    className="text-[0.52rem] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full"
-                                    style={{
-                                        background: "linear-gradient(135deg, rgba(124,58,237,0.3), rgba(37,99,235,0.3))",
-                                        border: "1px solid rgba(99,102,241,0.3)",
-                                        color: "#a78bfa",
+                .brand-text-main span {
+                    color: #3b82f6;
+                }
+
+                .brand-text-sub {
+                    font-family: 'DM Sans', sans-serif;
+                    font-size: 0.48rem;
+                    font-weight: 500;
+                    text-transform: uppercase;
+                    letter-spacing: 0.22em;
+                    color: #334155;
+                    margin-top: 4px;
+                }
+
+                .close-btn {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: rgba(255,255,255,0.04);
+                    border: 1px solid rgba(255,255,255,0.06);
+                    cursor: pointer;
+                    color: #475569;
+                    transition: all 0.15s;
+                }
+                .close-btn:hover { background: rgba(255,255,255,0.08); color: #94a3b8; }
+
+                /* Show X only on mobile */
+                .close-btn-mobile {
+                    display: flex;
+                }
+                @media (min-width: 768px) {
+                    .close-btn-mobile {
+                        display: none;
+                    }
+                }
+
+                /* Section label */
+                .section-label {
+                    font-family: 'DM Sans', sans-serif;
+                    font-size: 0.52rem;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 0.26em;
+                    color: #2d3748;
+                    padding: 0 16px;
+                    margin-bottom: 6px;
+                }
+
+                /* Divider */
+                .divider {
+                    height: 1px;
+                    margin: 0 14px;
+                    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+                    flex-shrink: 0;
+                }
+
+                /* Nav scroll area */
+                .nav-scroll {
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: 0 8px 8px;
+                    scrollbar-width: none;
+                }
+                .nav-scroll::-webkit-scrollbar { display: none; }
+
+                /* Nav button */
+                .nav-btn {
+                    width: 100%;
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    gap: 11px;
+                    padding: 9px 10px;
+                    border-radius: 11px;
+                    border: 1px solid transparent;
+                    background: transparent;
+                    cursor: pointer;
+                    text-align: left;
+                    outline: none;
+                    transition: background 0.15s, border-color 0.15s;
+                    margin-bottom: 1px;
+                }
+
+                .nav-btn.active {
+                    border-color: rgba(255,255,255,0.07);
+                }
+
+                .nav-btn:not(.active):hover {
+                    background: rgba(255,255,255,0.03);
+                }
+
+                /* Icon wrapper */
+                .icon-wrap {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 9px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    flex-shrink: 0;
+                    transition: all 0.2s;
+                }
+
+                /* Labels */
+                .nav-label {
+                    font-family: 'DM Sans', sans-serif;
+                    font-size: 0.8rem;
+                    font-weight: 600;
+                    line-height: 1;
+                    color: #475569;
+                    transition: color 0.15s;
+                }
+                .nav-btn.active .nav-label,
+                .nav-btn:hover .nav-label {
+                    color: #e2e8f0;
+                }
+
+                .nav-sublabel {
+                    font-size: 0.58rem;
+                    color: #1e293b;
+                    margin-top: 3px;
+                    line-height: 1;
+                    transition: color 0.15s;
+                }
+                .nav-btn:hover .nav-sublabel { color: #334155; }
+
+                /* Badge */
+                .nav-badge {
+                    font-size: 0.46rem;
+                    font-weight: 800;
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    padding: 2px 7px;
+                    border-radius: 99px;
+                    flex-shrink: 0;
+                    background: linear-gradient(135deg, rgba(139,92,246,0.2), rgba(99,102,241,0.15));
+                    border: 1px solid rgba(139,92,246,0.3);
+                    color: #a78bfa;
+                }
+
+                /* Chevron */
+                .nav-chevron {
+                    flex-shrink: 0;
+                    color: #1e293b;
+                    transition: all 0.15s;
+                    opacity: 0;
+                }
+                .nav-btn:hover .nav-chevron,
+                .nav-btn.active .nav-chevron {
+                    opacity: 1;
+                    color: #334155;
+                }
+                .nav-btn.active .nav-chevron { transform: translateX(1px); }
+
+                /* User card */
+                .user-card {
+                    margin: 0 10px 16px;
+                    padding: 11px 12px;
+                    border-radius: 13px;
+                    background: rgba(255,255,255,0.025);
+                    border: 1px solid rgba(255,255,255,0.05);
+                    display: flex;
+                    align-items: center;
+                    gap: 11px;
+                    flex-shrink: 0;
+                    transition: background 0.15s;
+                    cursor: default;
+                }
+                .user-card:hover {
+                    background: rgba(255,255,255,0.04);
+                }
+
+                .user-avatar {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 9px;
+                    flex-shrink: 0;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-family: 'Syne', sans-serif;
+                    font-weight: 900;
+                    font-size: 0.72rem;
+                    color: #fff;
+                    background: linear-gradient(135deg, #1d4ed8, #6d28d9);
+                    box-shadow: 0 3px 10px rgba(37,99,235,0.25);
+                    letter-spacing: -0.01em;
+                }
+
+                .user-name {
+                    font-family: 'DM Sans', sans-serif;
+                    font-size: 0.76rem;
+                    font-weight: 600;
+                    color: #cbd5e1;
+                    line-height: 1;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    margin-bottom: 4px;
+                }
+
+                .user-email {
+                    font-size: 0.58rem;
+                    color: #334155;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .online-dot-wrap {
+                    flex-shrink: 0;
+                    position: relative;
+                    width: 7px;
+                    height: 7px;
+                    margin-left: auto;
+                }
+
+                .online-dot-ping {
+                    position: absolute;
+                    inset: 0;
+                    border-radius: 50%;
+                    background: #22c55e;
+                    opacity: 0.5;
+                    animation: ping 2s ease-in-out infinite;
+                }
+
+                .online-dot-solid {
+                    position: absolute;
+                    inset: 0;
+                    border-radius: 50%;
+                    background: #22c55e;
+                }
+
+                /* Skeleton */
+                .skeleton {
+                    border-radius: 5px;
+                    background: rgba(255,255,255,0.05);
+                    animation: pulse 1.6s ease-in-out infinite;
+                }
+            `}</style>
+
+            <aside className="sidebar-root">
+                <div className="sidebar-inner">
+
+                    {/* ── BRAND ── */}
+                    <div className="brand-area">
+                        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                            <div className="logo-ring">
+                                <Image
+                                    src="/images/logo.png"
+                                    alt="SariSari IMS"
+                                    fill
+                                    style={{ objectFit: "contain" }}
+                                    sizes="38px"
+                                    onError={e => {
+                                        const t = e.currentTarget as HTMLImageElement;
+                                        t.style.display = "none";
                                     }}
-                                >
-                                    {item.badge}
-                                </span>
-                            ) : (
-                                <ChevronRight
-                                    size={13}
-                                    className={`transition-all duration-200 ${isActive
-                                            ? "text-slate-400 opacity-100"
-                                            : "text-slate-700 opacity-0 group-hover:opacity-100 group-hover:text-slate-500"
-                                        }`}
                                 />
-                            )}
-                        </button>
-                    );
-                })}
-            </nav>
-
-            {/* Bottom separator */}
-            <div
-                className="mx-5 mt-4 mb-4"
-                style={{ height: "1px", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent)" }}
-            />
-
-            {/* Footer area */}
-            <div className="mt-auto px-4 pb-6 space-y-4">
-                {/* Quote */}
-                <div className="px-2">
-                    <div className="flex items-start gap-2 opacity-40">
-                        <Quote size={10} className="text-blue-400 mt-0.5 shrink-0" />
-                        <p className="text-[0.6rem] font-medium italic text-slate-500 leading-tight">
-                            &ldquo;{QUOTES[quoteIndex]}&rdquo;
-                        </p>
-                    </div>
-                </div>
-
-                {/* Store card */}
-                <div className="relative group">
-                    <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-2xl blur opacity-0 group-hover:opacity-100 transition duration-500" />
-                    <div
-                        className="relative overflow-hidden rounded-2xl p-3.5 flex items-center gap-3 bg-[#0f172a]/80 border border-white/5 backdrop-blur-xl transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-white/10"
-                    >
-                        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <div className="relative w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 ring-1 ring-white/10 group-hover:ring-blue-500/50 transition-all duration-300">
-                            <Image
-                                src="/images/2.png"
-                                alt="Store"
-                                fill
-                                className="object-cover group-hover:scale-110 transition-transform duration-500"
-                                onError={e => {
-                                    const t = e.currentTarget as HTMLImageElement;
-                                    t.style.display = "none";
-                                    const p = t.parentElement;
-                                    if (p) {
-                                        p.style.background = "linear-gradient(135deg, #1e293b, #0f172a)";
-                                        p.innerHTML = `<span class="flex items-center justify-center h-full text-lg">🏪</span>`;
-                                    }
-                                }}
-                            />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-[0.6rem] font-black text-slate-500 uppercase tracking-[0.15em] leading-none">
-                                System Engine
-                            </p>
-                            <div className="flex items-center gap-2 mt-1.5">
-                                <div className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                                </div>
-                                <span className="text-[0.7rem] font-black text-emerald-400 tracking-wide uppercase">
-                                    Operational
-                                </span>
+                            </div>
+                            <div>
+                                <p className="brand-text-main">
+                                    SariSari<span>.</span>IMS
+                                </p>
+                                <p className="brand-text-sub">Management System</p>
                             </div>
                         </div>
-                        <button className="relative w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 border border-white/5 text-slate-500 hover:text-white hover:bg-white/10 transition-all">
-                            <Settings size={14} className="group-hover:rotate-90 transition-transform duration-500" />
+
+                        <button className="close-btn close-btn-mobile" onClick={closeMobile}>
+                            <X size={13} />
                         </button>
                     </div>
-                </div>
 
-                {/* Version */}
-                <div className="flex items-center justify-center gap-3">
-                    <div className="h-[1px] w-4 bg-slate-800" />
-                    <p className="text-[0.55rem] font-black uppercase tracking-[0.25em] text-slate-600">
-                        MS-v2.0.4
-                    </p>
-                    <div className="h-[1px] w-4 bg-slate-800" />
+                    {/* Spacer + divider */}
+                    <div style={{ height: 20 }} />
+                    <div className="divider" />
+                    <div style={{ height: 16 }} />
+
+                    {/* ── NAV ── */}
+                    <div className="nav-scroll">
+                        <p className="section-label">Navigation</p>
+
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                            {NAV.map((item, i) => {
+                                const Icon = item.icon;
+                                const isActive = mounted && activeTab === item.id;
+                                const isHovered = hoveredId === item.id;
+
+                                return (
+                                    <motion.button
+                                        key={item.id}
+                                        className={`nav-btn ${isActive ? "active" : ""}`}
+                                        onClick={() => {
+                                            setActiveTab(item.id);
+                                            if (typeof window !== "undefined" && window.innerWidth < 768) closeMobile();
+                                        }}
+                                        onMouseEnter={() => setHoveredId(item.id)}
+                                        onMouseLeave={() => setHoveredId(null)}
+                                        suppressHydrationWarning
+                                        initial={{ opacity: 0, x: -8 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: i * 0.04, duration: 0.25 }}
+                                        style={isActive ? {
+                                            background: `linear-gradient(105deg, rgba(${item.accentRgb},0.1) 0%, rgba(${item.accentRgb},0.04) 100%)`,
+                                            borderColor: `rgba(${item.accentRgb},0.18)`,
+                                        } : {}}
+                                    >
+                                        {/* Active indicator bar */}
+                                        <AnimatePresence>
+                                            {isActive && (
+                                                <motion.span
+                                                    layoutId="activeBar"
+                                                    style={{
+                                                        position: "absolute",
+                                                        left: 0,
+                                                        top: "50%",
+                                                        transform: "translateY(-50%)",
+                                                        width: 3,
+                                                        height: 20,
+                                                        borderRadius: "0 3px 3px 0",
+                                                        background: item.accent,
+                                                        boxShadow: `0 0 8px ${item.accent}80`,
+                                                    }}
+                                                    transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                                                />
+                                            )}
+                                        </AnimatePresence>
+
+                                        {/* Icon */}
+                                        <div
+                                            className="icon-wrap"
+                                            style={isActive ? {
+                                                background: `rgba(${item.accentRgb},0.12)`,
+                                                boxShadow: `0 0 0 1px rgba(${item.accentRgb},0.15)`,
+                                            } : {
+                                                background: "rgba(255,255,255,0.03)",
+                                            }}
+                                        >
+                                            <Icon
+                                                size={14}
+                                                style={{
+                                                    color: isActive ? item.accent : (isHovered ? "#94a3b8" : "#374151"),
+                                                    transition: "color 0.15s",
+                                                }}
+                                            />
+                                        </div>
+
+                                        {/* Text */}
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <p className="nav-label">{item.label}</p>
+                                            <p className="nav-sublabel">{item.sublabel}</p>
+                                        </div>
+
+                                        {/* Badge or chevron */}
+                                        {item.badge ? (
+                                            <span className="nav-badge">{item.badge}</span>
+                                        ) : (
+                                            <ChevronRight size={11} className="nav-chevron" />
+                                        )}
+                                    </motion.button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Divider */}
+                    <div style={{ marginBottom: 12 }}>
+                        <div className="divider" />
+                    </div>
+
+                    {/* ── STATUS BAR ── */}
+                    <div style={{ padding: "0 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                        <Zap size={10} style={{ color: "#22c55e", flexShrink: 0 }} />
+                        <span style={{ fontSize: "0.56rem", color: "#1e3a2f", fontWeight: 600, letterSpacing: "0.04em" }}>
+                            All systems operational
+                        </span>
+                        <div style={{ marginLeft: "auto", height: 4, width: 40, borderRadius: 99, overflow: "hidden", background: "rgba(255,255,255,0.04)" }}>
+                            <div style={{ height: "100%", width: "72%", background: "linear-gradient(90deg, #22c55e, #10b981)", borderRadius: 99 }} />
+                        </div>
+                    </div>
+
+                    {/* ── USER CARD ── */}
+                    <div className="user-card">
+                        <div className="user-avatar">
+                            {loading ? (
+                                <span style={{
+                                    width: 13, height: 13, borderRadius: "50%",
+                                    border: "2px solid rgba(255,255,255,0.15)",
+                                    borderTopColor: "#fff",
+                                    display: "inline-block",
+                                    animation: "spin 0.7s linear infinite",
+                                }} />
+                            ) : initials}
+                        </div>
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            {loading ? (
+                                <>
+                                    <div className="skeleton" style={{ height: 9, width: 72, marginBottom: 6 }} />
+                                    <div className="skeleton" style={{ height: 7, width: 108 }} />
+                                </>
+                            ) : (
+                                <>
+                                    <p className="user-name" title={storeName ?? undefined}>
+                                        {storeName ?? "My Store"}
+                                    </p>
+                                    <p className="user-email" title={userEmail ?? undefined}>
+                                        {userEmail ?? "—"}
+                                    </p>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="online-dot-wrap">
+                            <span className="online-dot-ping" />
+                            <span className="online-dot-solid" />
+                        </div>
+                    </div>
+
                 </div>
-            </div>
-        </aside>
+            </aside>
+        </>
     );
 }
