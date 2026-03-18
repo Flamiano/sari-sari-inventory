@@ -212,7 +212,7 @@ export default function SettingsPage() {
     useEffect(() => { loadProfile(); loadMfa(); }, [loadProfile, loadMfa]);
 
     // Cooldown timer helper
-    const startCooldown = (setter: (n: number) => void, secs = 60) => {
+    const startCooldown = (setter: React.Dispatch<React.SetStateAction<number>>, secs = 60) => {
         setter(secs);
         const id = setInterval(() => setter((p: number) => { if (p <= 1) { clearInterval(id); return 0; } return p - 1; }), 1000);
     };
