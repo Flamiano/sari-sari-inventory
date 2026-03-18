@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/app/utils/supabase";
-import toast, { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 
 // Toaster style matching the login page
 const TOAST_OPTS = {
@@ -214,7 +214,7 @@ export default function SettingsPage() {
     // Cooldown timer helper
     const startCooldown = (setter: (n: number) => void, secs = 60) => {
         setter(secs);
-        const id = setInterval(() => setter(p => { if (p <= 1) { clearInterval(id); return 0; } return p - 1; }), 1000);
+        const id = setInterval(() => setter((p: number) => { if (p <= 1) { clearInterval(id); return 0; } return p - 1; }), 1000);
     };
 
     // Save profile to profiles table — email must be included to satisfy NOT NULL constraint
@@ -388,7 +388,6 @@ export default function SettingsPage() {
                 .ring-focus:focus { box-shadow: 0 0 0 3px rgba(37,99,235,0.14); border-color: #93c5fd !important; }
             `}</style>
 
-            <Toaster position="top-right" toastOptions={TOAST_OPTS} />
 
             {/* Delete account confirm modal */}
             <ConfirmModal
