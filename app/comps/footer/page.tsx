@@ -165,7 +165,7 @@ export default function Footer() {
                                 },
                                 {
                                     icon: <MapPin size={13} />,
-                                    label: "Brgy. Commonwealth, QC",
+                                    label: "BCP",
                                     sub: "BCP Store Location",
                                     href: "/pages/contact",
                                     color: "#EF4444",
