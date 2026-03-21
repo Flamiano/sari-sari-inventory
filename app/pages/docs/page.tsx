@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
@@ -845,8 +845,8 @@ function SidebarNav({
     );
 }
 
-// Main docs page
-export default function DocsPage() {
+// Inner component — uses useSearchParams, must be inside Suspense
+function DocsContent() {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -1070,5 +1070,18 @@ export default function DocsPage() {
 
             <Footer />
         </div>
+    );
+}
+
+
+export default function DocsPage() {
+    return (
+        <Suspense fallback={
+            <div style={{ background: "#F8FAFC", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div className="w-8 h-8 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
+            </div>
+        }>
+            <DocsContent />
+        </Suspense>
     );
 }
