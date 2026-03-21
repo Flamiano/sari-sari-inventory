@@ -353,7 +353,8 @@ export default function SecurePageGate({
                             </form>
 
                             {/* Info note */}
-                            <div className="mt-4 flex items-start gap-2.5 bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-3">
+                            <div className="mt-4 flex items-start gap-2.5 bg-slate-50 bor
+                            der border-slate-100 rounded-xl px-3.5 py-3">
                                 <ShieldCheck size={13} className="text-slate-400 mt-0.5 shrink-0" />
                                 <p className="text-[0.72rem] text-slate-400 font-medium leading-relaxed">
                                     Unlocking here gives access to <span className="font-bold text-slate-600">Dashboard, Sales History &amp; Analytics</span> for 15 minutes. Session auto-locks after inactivity.

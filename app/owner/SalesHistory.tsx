@@ -1,17 +1,19 @@
 "use client";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
     Receipt, Search, X, ChevronLeft, ChevronRight,
     Loader2, ChefHat, Store, UtensilsCrossed, Package,
     Calendar, TrendingUp, DollarSign, ShoppingBag,
     ChevronDown, ChevronUp, FileText, FileSpreadsheet,
     Eye, Tag, Filter, ArrowUpRight, Banknote, User, UserCheck,
+    CheckCircle2, RotateCcw,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { supabase } from "@/app/utils/supabase";
 import SecurePageGate from "./SecurePageGate";
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+// Types
 
 interface TransactionItem {
     id: string;
@@ -59,15 +61,296 @@ const SARI_SARI_SUBCATEGORIES = [
 
 const CAT_STYLE: Record<string, {
     bg: string; text: string; activeBg: string; border: string;
-    icon: React.ElementType; fill: string;
+    icon: React.ElementType; fill: string; swatch: string;
 }> = {
-    All: { bg: "bg-slate-100", text: "text-slate-600", activeBg: "bg-slate-900", border: "border-slate-200", icon: Package, fill: "#64748b" },
-    Almusal: { bg: "bg-amber-50", text: "text-amber-700", activeBg: "bg-amber-500", border: "border-amber-200", icon: ChefHat, fill: "#f59e0b" },
-    "Sari-Sari": { bg: "bg-blue-50", text: "text-blue-700", activeBg: "bg-blue-600", border: "border-blue-200", icon: Store, fill: "#2563eb" },
-    Meryenda: { bg: "bg-orange-50", text: "text-orange-700", activeBg: "bg-orange-500", border: "border-orange-200", icon: UtensilsCrossed, fill: "#f97316" },
+    All: { bg: "bg-slate-100", text: "text-slate-600", activeBg: "bg-slate-900", border: "border-slate-200", icon: Package, fill: "#64748b", swatch: "#e2e8f0" },
+    Almusal: { bg: "bg-amber-50", text: "text-amber-700", activeBg: "bg-amber-500", border: "border-amber-200", icon: ChefHat, fill: "#f59e0b", swatch: "#fde68a" },
+    "Sari-Sari": { bg: "bg-blue-50", text: "text-blue-700", activeBg: "bg-blue-600", border: "border-blue-200", icon: Store, fill: "#2563eb", swatch: "#bfdbfe" },
+    Meryenda: { bg: "bg-orange-50", text: "text-orange-700", activeBg: "bg-orange-500", border: "border-orange-200", icon: UtensilsCrossed, fill: "#f97316", swatch: "#fed7aa" },
 };
 
-// ─── Seller badge ──────────────────────────────────────────────────────────────
+// DropdownSelect — reusable dropdown with dot/swatch indicators
+
+interface DropdownOption {
+    value: string;
+    label: string;
+    dot?: string;
+    swatch?: string;
+}
+
+function DropdownSelect({
+    label, value, options, onSelect, icon,
+}: {
+    label: string;
+    value: string;
+    options: DropdownOption[];
+    onSelect: (v: string) => void;
+    icon?: React.ReactNode;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+    const current = options.find(o => o.value === value);
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-white border rounded-xl text-left transition-all w-full sm:w-auto"
+                style={{
+                    border: open ? "1.5px solid #93c5fd" : "1.5px solid #e2e8f0",
+                    boxShadow: open ? "0 0 0 3px rgba(37,99,235,0.08)" : "none",
+                    minWidth: "150px",
+                }}>
+                {icon && <span className="text-slate-400">{icon}</span>}
+                <div className="flex-1 min-w-0">
+                    <p className="text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">{label}</p>
+                    <p className="text-[0.8rem] font-black text-slate-800 leading-tight truncate">
+                        {current?.value === "all" || current?.value === "All" ? `All ${label}s` : (current?.label ?? "All")}
+                    </p>
+                </div>
+                <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+            </button>
+
+            <AnimatePresence>
+                {open && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 5, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 5, scale: 0.98 }}
+                        transition={{ duration: 0.13, ease: [0.22, 1, 0.36, 1] }}
+                        className="absolute top-full left-0 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 z-50 overflow-hidden"
+                        style={{ minWidth: "200px" }}>
+                        <div className="py-1.5">
+                            <p className="px-3 pt-2 pb-1.5 text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest">
+                                {label}
+                            </p>
+                            {options.map(o => (
+                                <button
+                                    key={o.value}
+                                    type="button"
+                                    onClick={() => { onSelect(o.value); setOpen(false); }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                                    {o.dot && (
+                                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: o.dot }} />
+                                    )}
+                                    {o.swatch && (
+                                        <span className="w-3 h-3 rounded shrink-0 border border-slate-200" style={{ background: o.swatch }} />
+                                    )}
+                                    <span className={`text-[0.82rem] flex-1 ${value === o.value ? "font-black text-slate-900" : "font-medium text-slate-600"}`}>
+                                        {o.label}
+                                    </span>
+                                    {value === o.value && (
+                                        <CheckCircle2 size={13} className="text-blue-500 shrink-0" />
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+// DateDropdown — date range with custom inputs
+
+function DateDropdown({
+    value, onSelect, customFrom, customTo, onFromChange, onToChange, onApply,
+}: {
+    value: DateFilter;
+    onSelect: (v: DateFilter) => void;
+    customFrom: string; customTo: string;
+    onFromChange: (v: string) => void;
+    onToChange: (v: string) => void;
+    onApply: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    const DATE_OPTIONS: { id: DateFilter; label: string }[] = [
+        { id: "today", label: "Today" },
+        { id: "week", label: "This week" },
+        { id: "month", label: "This month" },
+        { id: "custom", label: "Custom range" },
+    ];
+
+    const displayLabel = (() => {
+        if (value === "custom" && customFrom && customTo) {
+            const fmt = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+            return `${fmt(customFrom)} – ${fmt(customTo)}`;
+        }
+        return DATE_OPTIONS.find(o => o.id === value)?.label ?? "Today";
+    })();
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-white border rounded-xl text-left transition-all w-full sm:w-auto"
+                style={{
+                    border: open ? "1.5px solid #93c5fd" : "1.5px solid #e2e8f0",
+                    boxShadow: open ? "0 0 0 3px rgba(37,99,235,0.08)" : "none",
+                    minWidth: "150px",
+                }}>
+                <Calendar size={13} className="text-slate-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                    <p className="text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">Date</p>
+                    <p className="text-[0.8rem] font-black text-slate-800 leading-tight truncate">{displayLabel}</p>
+                </div>
+                <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+            </button>
+
+            <AnimatePresence>
+                {open && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 5, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 5, scale: 0.98 }}
+                        transition={{ duration: 0.13, ease: [0.22, 1, 0.36, 1] }}
+                        className="absolute top-full left-0 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 z-50 overflow-hidden"
+                        style={{ minWidth: "220px" }}>
+                        <div className="py-1.5">
+                            <p className="px-3 pt-2 pb-1.5 text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest">Date range</p>
+                            {DATE_OPTIONS.map(o => (
+                                <button
+                                    key={o.id}
+                                    type="button"
+                                    onClick={() => onSelect(o.id)}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                                    <span className={`text-[0.82rem] flex-1 ${value === o.id ? "font-black text-slate-900" : "font-medium text-slate-600"}`}>
+                                        {o.label}
+                                    </span>
+                                    {value === o.id && (
+                                        <CheckCircle2 size={13} className="text-blue-500 shrink-0" />
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+
+                        {value === "custom" && (
+                            <div className="border-t border-slate-100 p-3 space-y-2">
+                                <p className="text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest">Custom range</p>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="date"
+                                        value={customFrom}
+                                        onChange={e => onFromChange(e.target.value)}
+                                        className="flex-1 text-[0.75rem] font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-2 outline-none bg-white"
+                                        style={{ minWidth: 0 }}
+                                    />
+                                    <span className="text-[0.7rem] text-slate-300 font-bold shrink-0">—</span>
+                                    <input
+                                        type="date"
+                                        value={customTo}
+                                        onChange={e => onToChange(e.target.value)}
+                                        className="flex-1 text-[0.75rem] font-medium text-slate-700 border border-slate-200 rounded-lg px-2.5 py-2 outline-none bg-white"
+                                        style={{ minWidth: 0 }}
+                                    />
+                                </div>
+                                <button
+                                    onClick={() => { onApply(); setOpen(false); }}
+                                    className="w-full py-2 bg-blue-600 text-white rounded-lg text-[0.75rem] font-black hover:bg-blue-700 transition-colors">
+                                    Apply
+                                </button>
+                            </div>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+// SubcategoryDropdown — scrollable subcategory list for Sari-Sari
+
+function SubcategoryDropdown({
+    value, onSelect,
+}: {
+    value: string;
+    onSelect: (v: string) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-white border rounded-xl text-left transition-all w-full sm:w-auto"
+                style={{
+                    border: open ? "1.5px solid #93c5fd" : "1.5px solid #e2e8f0",
+                    boxShadow: open ? "0 0 0 3px rgba(37,99,235,0.08)" : "none",
+                    minWidth: "160px",
+                }}>
+                <Tag size={13} className="text-slate-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                    <p className="text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">Subcategory</p>
+                    <p className="text-[0.8rem] font-black text-slate-800 leading-tight truncate">
+                        {value === "All" ? "All Subcategories" : value}
+                    </p>
+                </div>
+                <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+            </button>
+
+            <AnimatePresence>
+                {open && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 5, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 5, scale: 0.98 }}
+                        transition={{ duration: 0.13, ease: [0.22, 1, 0.36, 1] }}
+                        className="absolute top-full left-0 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 z-50 overflow-hidden"
+                        style={{ minWidth: "210px", maxHeight: "260px", overflowY: "auto" }}>
+                        <div className="py-1.5">
+                            <p className="px-3 pt-2 pb-1.5 text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest sticky top-0 bg-white">Subcategory</p>
+                            {["All", ...SARI_SARI_SUBCATEGORIES].map(sub => (
+                                <button
+                                    key={sub}
+                                    type="button"
+                                    onClick={() => { onSelect(sub); setOpen(false); }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 transition-colors text-left">
+                                    <span className={`text-[0.82rem] flex-1 ${value === sub ? "font-black text-slate-900" : "font-medium text-slate-600"}`}>
+                                        {sub === "All" ? "All Subcategories" : sub}
+                                    </span>
+                                    {value === sub && <CheckCircle2 size={13} className="text-blue-500 shrink-0" />}
+                                </button>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+// Seller badge
 
 function SellerBadge({ soldByName, soldByStaffId, small = false }: {
     soldByName: string | null;
@@ -79,8 +362,8 @@ function SellerBadge({ soldByName, soldByStaffId, small = false }: {
     const sz = small ? "text-[8px] px-1.5 py-0.5" : "text-[9px] px-2 py-1";
     return (
         <span className={`inline-flex items-center gap-1 font-black rounded-md uppercase tracking-wide whitespace-nowrap ${sz} ${isCashier
-                ? "bg-cyan-50 text-cyan-700 border border-cyan-200"
-                : "bg-violet-50 text-violet-700 border border-violet-200"
+            ? "bg-cyan-50 text-cyan-700 border border-cyan-200"
+            : "bg-violet-50 text-violet-700 border border-violet-200"
             }`}>
             {isCashier ? <UserCheck size={small ? 7 : 9} /> : <User size={small ? 7 : 9} />}
             {label}
@@ -88,7 +371,7 @@ function SellerBadge({ soldByName, soldByStaffId, small = false }: {
     );
 }
 
-// ─── Transaction Detail Modal ──────────────────────────────────────────────────
+// Transaction detail modal
 
 function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: () => void }) {
     const [items, setItems] = useState<TransactionItem[]>([]);
@@ -121,8 +404,6 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
             onClick={e => e.target === e.currentTarget && onClose()}
         >
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "90vh" }}>
-
-                {/* Header */}
                 <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 text-white">
                     <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center gap-3">
@@ -141,11 +422,10 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
                         </button>
                     </div>
 
-                    {/* Sold by chip */}
                     <div className="mb-4">
                         <span className={`inline-flex items-center gap-1.5 text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest ${isCashier
-                                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
-                                : "bg-violet-500/20 text-violet-300 border border-violet-500/30"
+                            ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                            : "bg-violet-500/20 text-violet-300 border border-violet-500/30"
                             }`}>
                             {isCashier ? <UserCheck size={10} /> : <User size={10} />}
                             Sold by: {sellerLabel}
@@ -166,7 +446,6 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
                     </div>
                 </div>
 
-                {/* Items */}
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
                     {loading ? (
                         <div className="flex items-center justify-center py-12">
@@ -213,7 +492,6 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
                     )}
                 </div>
 
-                {/* Footer */}
                 <div className="border-t border-slate-100 bg-slate-50 px-5 py-4 space-y-2 rounded-b-3xl">
                     {[
                         { label: "Total Amount", value: php(txn.total_amount) },
@@ -233,7 +511,7 @@ function TransactionDetailModal({ txn, onClose }: { txn: Transaction; onClose: (
     );
 }
 
-// ─── Stat Card ─────────────────────────────────────────────────────────────────
+// Stat card
 
 function StatCard({ label, value, sub, icon: Icon, color }: {
     label: string; value: string; sub?: string;
@@ -255,7 +533,7 @@ function StatCard({ label, value, sub, icon: Icon, color }: {
     );
 }
 
-// ─── PDF Export ────────────────────────────────────────────────────────────────
+// PDF export
 
 async function exportSalesPDF(transactions: Transaction[], allItems: TransactionItem[], label: string, dateLabel: string) {
     const { default: jsPDF } = await import("jspdf");
@@ -356,9 +634,7 @@ async function exportSalesExcel(transactions: Transaction[], allItems: Transacti
     XLSX.writeFile(wb, `sales-${label.toLowerCase().replace(/[\s/]+/g, "-")}-${ref}.xlsx`);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── INNER VIEW ─────────────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
+// Inner content
 
 function SalesHistoryContent() {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -404,8 +680,6 @@ function SalesHistoryContent() {
             if (txnErr) throw txnErr;
 
             let txnList: Transaction[] = (txnData ?? []) as Transaction[];
-
-            // Seller filter
             if (sellerFilter === "owner") txnList = txnList.filter(t => !t.sold_by_staff_id);
             if (sellerFilter === "cashier") txnList = txnList.filter(t => !!t.sold_by_staff_id);
 
@@ -469,6 +743,18 @@ function SalesHistoryContent() {
     const filterLabel = categoryFilter === "All" ? "All Categories" : categoryFilter === "Sari-Sari" && subcategoryFilter !== "All" ? `${categoryFilter} › ${subcategoryFilter}` : categoryFilter;
     const exportItems = filteredItems.map(i => ({ ...i, transaction_id: (i as any).transaction_id ?? "" }));
 
+    // check if any non-default filter is active
+    const anyFilterActive = dateFilter !== "today" || categoryFilter !== "All" || sellerFilter !== "all" || subcategoryFilter !== "All";
+
+    const resetFilters = () => {
+        setDateFilter("today");
+        setCategoryFilter("All");
+        setSubcategoryFilter("All");
+        setSellerFilter("all");
+        setCustomFrom("");
+        setCustomTo("");
+    };
+
     const handleExportCSV = () => {
         if (!transactions.length) return toast.error("No data to export.");
         const rows = [["Transaction Ref", "Date", "Time", "Sold By", "Total Amount", "Amount Paid", "Change", "Items"], ...transactions.map(t => { const d = new Date(t.created_at); const seller = t.sold_by_staff_id ? (t.sold_by_name ?? "Cashier") : "Store Owner"; return [t.transaction_ref, d.toLocaleDateString("en-PH"), d.toLocaleTimeString("en-PH", { timeStyle: "short" }), seller, t.total_amount.toFixed(2), t.amount_paid.toFixed(2), t.change_amount.toFixed(2), t.item_count]; })];
@@ -479,7 +765,6 @@ function SalesHistoryContent() {
     const handleExportPDF = () => { if (!transactions.length) return toast.error("No data to export."); toast.promise(exportSalesPDF(transactions, exportItems, filterLabel, dateLabel), { loading: "Generating PDF…", success: "PDF exported!", error: "Export failed." }); };
     const handleExportExcel = () => { if (!transactions.length) return toast.error("No data to export."); toast.promise(exportSalesExcel(transactions, exportItems, filterLabel, dateLabel), { loading: "Generating Excel…", success: "Excel exported!", error: "Export failed." }); };
 
-    // Seller breakdown
     const sellerBreakdown = transactions.reduce((acc, t) => {
         const isCashier = !!t.sold_by_staff_id;
         const key = isCashier ? (t.sold_by_name ?? "Unknown Cashier") : "Store Owner";
@@ -491,7 +776,7 @@ function SalesHistoryContent() {
     return (
         <div className="space-y-6 pb-8">
 
-            {/* ── Header ── */}
+            {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-black text-slate-900 tracking-tight">Sales History</h1>
@@ -504,73 +789,81 @@ function SalesHistoryContent() {
                 </div>
             </div>
 
-            {/* ── Filters ── */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* Filters — dropdown style matching FeedbackView */}
+            <div className="space-y-2.5">
+                <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2.5">
 
-                {/* Date */}
-                <div className="p-4 border-b border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5"><Calendar size={10} /> Date Range</p>
-                    <div className="flex flex-wrap gap-2">
-                        {(["today", "week", "month", "custom"] as DateFilter[]).map(f => (
-                            <button key={f} onClick={() => setDateFilter(f)} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${dateFilter === f ? "bg-slate-900 text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
-                                {f === "today" ? "Today" : f === "week" ? "This Week" : f === "month" ? "This Month" : "Custom"}
-                            </button>
-                        ))}
-                    </div>
-                    {dateFilter === "custom" && (
-                        <div className="flex flex-wrap gap-3 items-center mt-3">
-                            {([["From", customFrom, setCustomFrom], ["To", customTo, setCustomTo]] as [string, string, (v: string) => void][]).map(([lbl, val, set]) => (
-                                <div key={lbl} className="flex items-center gap-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{lbl}</label>
-                                    <input type="date" value={val} onChange={e => set(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 outline-none focus:ring-2 ring-blue-500" />
-                                </div>
-                            ))}
-                            <button onClick={fetchTransactions} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-black hover:bg-blue-700 transition-colors">Apply</button>
-                        </div>
-                    )}
-                </div>
+                    {/* Date */}
+                    <DateDropdown
+                        value={dateFilter}
+                        onSelect={v => setDateFilter(v)}
+                        customFrom={customFrom}
+                        customTo={customTo}
+                        onFromChange={setCustomFrom}
+                        onToChange={setCustomTo}
+                        onApply={fetchTransactions}
+                    />
 
-                {/* Category */}
-                <div className="p-4 border-b border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5"><Filter size={10} /> Category</p>
-                    <div className="flex flex-wrap gap-2">
-                        {(["All", "Almusal", "Sari-Sari", "Meryenda"] as CategoryFilter[]).map(cat => {
-                            const cs = CAT_STYLE[cat]; const Icon = cs.icon; const active = categoryFilter === cat;
-                            return (<button key={cat} onClick={() => { setCategoryFilter(cat); setSubcategoryFilter("All"); }} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border ${active ? `${cs.activeBg} text-white border-transparent shadow-sm` : `${cs.bg} ${cs.text} ${cs.border} hover:opacity-80`}`}><Icon size={12} />{cat}</button>);
-                        })}
-                    </div>
+                    {/* Category */}
+                    <DropdownSelect
+                        label="Category"
+                        value={categoryFilter}
+                        onSelect={v => { setCategoryFilter(v as CategoryFilter); setSubcategoryFilter("All"); }}
+                        options={[
+                            { value: "All", label: "All Categories" },
+                            { value: "Almusal", label: "Almusal", swatch: "#fde68a" },
+                            { value: "Sari-Sari", label: "Sari-Sari", swatch: "#bfdbfe" },
+                            { value: "Meryenda", label: "Meryenda", swatch: "#fed7aa" },
+                        ]}
+                    />
+
+                    {/* Subcategory — only visible when Sari-Sari is selected */}
                     {categoryFilter === "Sari-Sari" && (
-                        <div className="mt-3 pt-3 border-t border-slate-100">
-                            <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-1"><Tag size={9} /> Subcategory</p>
-                            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
-                                <button onClick={() => setSubcategoryFilter("All")} className={`px-3 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all border ${subcategoryFilter === "All" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}>All</button>
-                                {SARI_SARI_SUBCATEGORIES.map(sub => (<button key={sub} onClick={() => setSubcategoryFilter(sub)} className={`px-3 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all border ${subcategoryFilter === sub ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}>{sub}</button>))}
-                            </div>
-                        </div>
+                        <SubcategoryDropdown
+                            value={subcategoryFilter}
+                            onSelect={setSubcategoryFilter}
+                        />
+                    )}
+
+                    {/* Seller */}
+                    <DropdownSelect
+                        label="Sold By"
+                        value={sellerFilter}
+                        onSelect={v => setSellerFilter(v as SellerFilter)}
+                        options={[
+                            { value: "all", label: "All Sales" },
+                            { value: "owner", label: "Owner Only", dot: "#7c3aed" },
+                            { value: "cashier", label: "Cashier Only", dot: "#0891b2" },
+                        ]}
+                    />
+
+                    {/* Reset */}
+                    {anyFilterActive && (
+                        <button onClick={resetFilters}
+                            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-[0.75rem] font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-xl transition-colors w-full sm:w-auto">
+                            <RotateCcw size={12} />
+                            Reset filters
+                        </button>
                     )}
                 </div>
 
-                {/* Seller filter — NEW */}
-                <div className="p-4 border-b border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5"><User size={10} /> Sold By</p>
-                    <div className="flex flex-wrap gap-2">
-                        {([{ id: "all", label: "All Sales", icon: <Package size={12} />, cls: "bg-slate-900 text-white" }, { id: "owner", label: "Owner Only", icon: <User size={12} />, cls: "bg-violet-600 text-white" }, { id: "cashier", label: "Cashier Only", icon: <UserCheck size={12} />, cls: "bg-cyan-600 text-white" }] as { id: SellerFilter; label: string; icon: React.ReactNode; cls: string }[])
-                            .map(f => (<button key={f.id} onClick={() => setSellerFilter(f.id)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border ${sellerFilter === f.id ? `${f.cls} border-transparent shadow-sm` : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"}`}>{f.icon}{f.label}</button>))}
-                    </div>
-                </div>
-
-                {/* Active filters bar */}
-                <div className="bg-slate-50 px-4 py-2.5 flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] font-bold text-slate-400">Showing:</span>
-                    <span className="bg-white border border-slate-200 text-slate-700 text-[10px] font-black px-2.5 py-1 rounded-full">{dateLabel}</span>
-                    {categoryFilter !== "All" && <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${CAT_STYLE[categoryFilter].bg} ${CAT_STYLE[categoryFilter].text} ${CAT_STYLE[categoryFilter].border}`}>{categoryFilter}</span>}
-                    {categoryFilter === "Sari-Sari" && subcategoryFilter !== "All" && <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-black px-2.5 py-1 rounded-full">{subcategoryFilter}</span>}
-                    {sellerFilter !== "all" && <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${sellerFilter === "cashier" ? "bg-cyan-50 text-cyan-700 border-cyan-200" : "bg-violet-50 text-violet-700 border-violet-200"}`}>{sellerFilter === "cashier" ? "Cashier Only" : "Owner Only"}</span>}
-                    <span className="ml-auto text-[10px] font-bold text-slate-400">{transactions.length} transaction{transactions.length !== 1 ? "s" : ""}</span>
-                </div>
+                {/* Active filter summary */}
+                {anyFilterActive && (
+                    <p className="text-[0.68rem] text-slate-400 font-medium px-1">
+                        Showing <span className="font-black text-slate-700">{filtered.length}</span> of{" "}
+                        <span className="font-black text-slate-700">{transactions.length}</span> transactions
+                        {dateFilter === "custom" && customFrom && customTo && (
+                            <span className="ml-1">
+                                · <span className="text-slate-600 font-semibold">{customFrom}</span>
+                                {" – "}
+                                <span className="text-slate-600 font-semibold">{customTo}</span>
+                            </span>
+                        )}
+                    </p>
+                )}
             </div>
 
-            {/* ── Stats ── */}
+            {/* Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatCard icon={DollarSign} label="Total Sales" value={php(totalSales)} sub="revenue collected" color={{ bg: "bg-emerald-100", icon: "text-emerald-600", text: "text-emerald-700" }} />
                 <StatCard icon={TrendingUp} label="Total Profit" value={php(totalProfit)} sub="net earned" color={{ bg: "bg-blue-100", icon: "text-blue-600", text: "text-blue-700" }} />
@@ -578,10 +871,9 @@ function SalesHistoryContent() {
                 <StatCard icon={ShoppingBag} label="Avg. Sale" value={php(avgSale)} sub="per transaction" color={{ bg: "bg-amber-100", icon: "text-amber-600", text: "text-amber-700" }} />
             </div>
 
-            {/* ── Category + Seller breakdown ── */}
+            {/* Category + Seller breakdown */}
             {!loading && transactions.length > 0 && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    {/* Category cards */}
                     {categoryFilter === "All" && categoryBreakdown.length > 0 && (
                         <div className={`${sellerList.length > 0 ? "lg:col-span-2" : "lg:col-span-3"} grid grid-cols-1 sm:grid-cols-${Math.min(categoryBreakdown.length, 3)} gap-3`}>
                             {categoryBreakdown.map(cat => {
@@ -605,7 +897,6 @@ function SalesHistoryContent() {
                         </div>
                     )}
 
-                    {/* Seller breakdown */}
                     {sellerList.length > 0 && (
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
                             <div className="flex items-center gap-2 mb-4">
@@ -639,7 +930,7 @@ function SalesHistoryContent() {
                 </div>
             )}
 
-            {/* ── Transaction list ── */}
+            {/* Transaction list */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 flex-wrap">
                     <div className="relative flex-1 max-w-sm">
@@ -686,7 +977,6 @@ function SalesHistoryContent() {
                                             <p className="text-sm font-black text-slate-800">{txn.transaction_ref}</p>
                                             <p className="text-[11px] text-slate-400 font-medium mt-0.5">{d.toLocaleDateString("en-PH", { dateStyle: "medium" })} · {d.toLocaleTimeString("en-PH", { timeStyle: "short" })}</p>
                                         </div>
-                                        {/* Sold By badge */}
                                         <div className="hidden sm:block shrink-0">
                                             <SellerBadge soldByName={txn.sold_by_name} soldByStaffId={txn.sold_by_staff_id} small />
                                         </div>
@@ -754,9 +1044,7 @@ function SalesHistoryContent() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── DEFAULT EXPORT ──────────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
+// Default export
 
 export default function SalesHistoryView() {
     return (

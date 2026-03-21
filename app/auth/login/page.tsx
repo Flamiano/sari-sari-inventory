@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/app/utils/supabase";
-import toast, { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 
 const FEATURES = [
     { icon: <Package size={14} />, text: "Real-time inventory tracking" },
@@ -327,11 +327,6 @@ export default function LoginPage() {
 
     return (
         <>
-            <Toaster position="top-right" toastOptions={{
-                style: { fontFamily: "Plus Jakarta Sans, sans-serif", fontWeight: 600, fontSize: "0.875rem", borderRadius: "12px", border: "1px solid #e2e8f0" },
-                success: { iconTheme: { primary: "#2563eb", secondary: "#fff" }, style: { borderLeft: "4px solid #2563eb" } },
-                error: { iconTheme: { primary: "#ef4444", secondary: "#fff" }, style: { borderLeft: "4px solid #ef4444" } },
-            }} />
 
             <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Syne:wght@700;800;900&display=swap');

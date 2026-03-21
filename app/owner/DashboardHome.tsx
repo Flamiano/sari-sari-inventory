@@ -10,7 +10,7 @@ import {
     BarChart3, RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import toast, { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 import SecurePageGate from "./SecurePageGate";
 
 // Types
@@ -736,8 +736,6 @@ function DashboardHomeContent({ onViewAll }: { onViewAll?: (tab: string) => void
 
     return (
         <>
-            <Toaster position="top-right" toastOptions={{ style: { borderRadius: "12px", fontSize: "13px", fontWeight: 600 } }} />
-
             <div className="space-y-6 pb-10">
 
                 {/* Welcome banner */}

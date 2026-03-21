@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
     User, Lock, Shield, Trash2, ChevronRight, Eye, EyeOff,
@@ -11,19 +11,6 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/app/utils/supabase";
 import toast from "react-hot-toast";
-
-// Toaster style matching the login page
-const TOAST_OPTS = {
-    style: {
-        fontFamily: "Plus Jakarta Sans, sans-serif",
-        fontWeight: 600,
-        fontSize: "0.875rem",
-        borderRadius: "12px",
-        border: "1px solid #e2e8f0",
-    },
-    success: { iconTheme: { primary: "#2563eb", secondary: "#fff" }, style: { borderLeft: "4px solid #2563eb" } },
-    error: { iconTheme: { primary: "#ef4444", secondary: "#fff" }, style: { borderLeft: "4px solid #ef4444" } },
-};
 
 // Types
 interface Profile {

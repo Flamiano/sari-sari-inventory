@@ -1,20 +1,33 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
     Mail, Eye, EyeOff, ArrowRight, Loader2,
-    Hash, Users, ShoppingCart,
+    Hash, Users, ShoppingCart, KeyRound, AlertTriangle,
+    ShieldCheck, RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/app/utils/supabase";
 import toast from "react-hot-toast";
+import { getDayStatus, isPastNoon } from "@/app/utils/attendanceOff";
 
 type PortalRole = "staff" | "cashier";
+type Step = "login" | "otp";
+
+const TODAY_STATUS = getDayStatus();
+const PAST_NOON = isPastNoon();
+const IS_LOCKED = TODAY_STATUS.type !== "workday" || PAST_NOON;
+
+const OTP_LENGTH = 8;
+const MAX_ATTEMPTS = 3;
 
 export default function StaffCashierLoginPage() {
     const router = useRouter();
+
+    // ── Login step state ──────────────────────────────────────────────────────
+    const [step, setStep] = useState<Step>("login");
     const [selectedRole, setSelectedRole] = useState<PortalRole | null>(null);
     const [showPin, setShowPin] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -26,6 +39,46 @@ export default function StaffCashierLoginPage() {
         mismatch?: { actualRole: string };
     }>({});
 
+    // ── OTP step state (cashier only) ─────────────────────────────────────────
+    const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
+    const [otpErrors, setOtpErrors] = useState<{ otp?: string }>({});
+    const [attempts, setAttempts] = useState(0);
+    const [shake, setShake] = useState(false);
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const autoSubmitRef = useRef(false);
+
+    // Saved staff data to finish sign-in after OTP (cashier)
+    const pendingStaffRef = useRef<any>(null);
+    const pendingEmailRef = useRef<string>("");
+
+    // ── Auto-submit OTP when all digits filled ────────────────────────────────
+    useEffect(() => {
+        const token = otp.join("");
+        if (
+            token.length === OTP_LENGTH &&
+            !autoSubmitRef.current &&
+            step === "otp" &&
+            !loading
+        ) {
+            autoSubmitRef.current = true;
+            submitOtp(token);
+        }
+        if (token.length < OTP_LENGTH) autoSubmitRef.current = false;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [otp]);
+
+    // ── Lock screen info ──────────────────────────────────────────────────────
+    const lockInfo = (() => {
+        if (TODAY_STATUS.type === "sunday")
+            return { emoji: "🌙", headline: "REST DAY", sub: "Today is Sunday — enjoy your day off!", color: "#7c3aed" };
+        if (TODAY_STATUS.type === "holiday")
+            return { emoji: "🎉", headline: TODAY_STATUS.label, sub: "This is a Philippine public holiday. Store is closed.", color: "#0891b2" };
+        if (PAST_NOON)
+            return { emoji: "🕛", headline: "Portal Closed", sub: "Login is only available before 12:00 PM. See you tomorrow!", color: "#ef4444" };
+        return null;
+    })();
+
+    // ── Validation ────────────────────────────────────────────────────────────
     const validate = () => {
         const errs: typeof errors = {};
         if (!selectedRole) errs.role = "Please select your role first.";
@@ -36,8 +89,10 @@ export default function StaffCashierLoginPage() {
         return errs;
     };
 
+    // ── Step 1: PIN + email submit ────────────────────────────────────────────
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (IS_LOCKED) { toast.error(lockInfo?.sub ?? "Login not available right now."); return; }
         const errs = validate();
         if (Object.keys(errs).length) { setErrors(errs); return; }
         setErrors({});
@@ -46,26 +101,18 @@ export default function StaffCashierLoginPage() {
         try {
             const emailLower = form.email.trim().toLowerCase();
 
-            // ── 1. Check if this is an owner email (safe function — no table dump) ──
-            const { data: isOwner, error: ownerErr } = await supabase
-                .rpc("is_owner_email", { p_email: emailLower });
-
-            if (ownerErr) {
-                // Function might not exist yet — fallback gracefully
-                console.warn("is_owner_email RPC error:", ownerErr.message);
-            } else if (isOwner === true) {
+            // Reject owner emails
+            const { data: isOwner, error: ownerErr } = await supabase.rpc("is_owner_email", { p_email: emailLower });
+            if (!ownerErr && isOwner === true) {
                 setLoading(false);
-                toast.error("This email belongs to an owner account. Use the Owner Portal.");
+                toast.error("Owner accounts cannot log in here. Use the Owner Portal.");
                 setErrors({ email: "Owner accounts cannot log in here. Use the Owner Portal." });
                 return;
             }
 
-            // ── 2. Look up staff by email (safe function — returns 1 row only) ──
-            const { data: staffRows, error: staffErr } = await supabase
-                .rpc("get_staff_by_email", { p_email: emailLower });
-
+            // Fetch staff record
+            const { data: staffRows, error: staffErr } = await supabase.rpc("get_staff_by_email", { p_email: emailLower });
             const staff = staffRows?.[0] ?? null;
-
             if (staffErr || !staff) {
                 setLoading(false);
                 toast.error("No staff account found for this email.");
@@ -73,7 +120,7 @@ export default function StaffCashierLoginPage() {
                 return;
             }
 
-            // ── 3. PIN check ──────────────────────────────────────────────────────
+            // PIN check
             if (staff.pin_code !== form.pin.trim()) {
                 setLoading(false);
                 toast.error("Incorrect PIN code.");
@@ -81,91 +128,316 @@ export default function StaffCashierLoginPage() {
                 return;
             }
 
-            // ── 4. Account status ─────────────────────────────────────────────────
+            // Status check
             if (staff.status === "inactive") {
                 setLoading(false);
-                toast.error("Your account is inactive. Contact your store owner.");
+                toast.error("Your account is inactive.");
                 setErrors({ email: "Account is inactive. Contact your store owner." });
                 return;
             }
             if (staff.status === "pending") {
                 setLoading(false);
-                toast.error("Your account is pending approval. Contact your store owner.");
+                toast.error("Account pending approval.");
                 setErrors({ email: "Account pending. Contact your store owner." });
                 return;
             }
 
-            // ── 5. Role mismatch ──────────────────────────────────────────────────
             const actualRole = staff.role as string;
 
+            // Role mismatch
             if (selectedRole === "staff" && actualRole === "cashier") {
                 setLoading(false);
-                toast.error("Correct PIN — but this is a Cashier account. Switch to Cashier.", { duration: 5000 });
+                toast.error("Correct PIN — but this is a Cashier account.", { duration: 5000 });
                 setErrors({ mismatch: { actualRole: "cashier" } });
                 return;
             }
             if (selectedRole === "cashier" && actualRole === "staff") {
                 setLoading(false);
-                toast.error("Correct PIN — but this is a Staff account. Switch to Staff.", { duration: 5000 });
+                toast.error("Correct PIN — but this is a Staff account.", { duration: 5000 });
                 setErrors({ mismatch: { actualRole: "staff" } });
                 return;
             }
 
-            // ── 6. Save session to sessionStorage ────────────────────────────────
-            if (typeof window !== "undefined") {
-                sessionStorage.setItem("staff_session", JSON.stringify({
-                    id: staff.id,
-                    full_name: staff.full_name,
-                    email: staff.email,
-                    role: staff.role,
-                    owner_id: staff.owner_id,
-                    logged_in_at: Date.now(),
-                }));
+            // ── STAFF WORKER: no OTP, go straight to dashboard ───────────────
+            if (actualRole === "staff") {
+                if (typeof window !== "undefined") {
+                    sessionStorage.setItem("staff_session", JSON.stringify({
+                        id: staff.id, full_name: staff.full_name, email: staff.email,
+                        role: staff.role, owner_id: staff.owner_id, logged_in_at: Date.now(),
+                    }));
+                }
+                setLoading(false);
+                toast.success(`Welcome, ${staff.full_name}! 🎉`);
+                setTimeout(() => router.push("/staff/staff-worker"), 900);
+                return;
             }
 
-            toast.success(`Welcome, ${staff.full_name}! 🎉`);
+            // ── CASHIER: send OTP, move to OTP step ──────────────────────────
+            const { error: otpError } = await supabase.auth.signInWithOtp({
+                email: emailLower,
+                options: { shouldCreateUser: false },
+            });
 
-            // ── 7. Redirect by role ───────────────────────────────────────────────
-            setTimeout(() => {
-                if (actualRole === "cashier") {
-                    router.push("/staff/cashier");
-                } else {
-                    router.push("/staff/staff-worker");
-                }
-            }, 900);
+            setLoading(false);
+
+            if (otpError) {
+                toast.error("Failed to send verification code. Try again.");
+                return;
+            }
+
+            // Store staff record for use after OTP success
+            pendingStaffRef.current = staff;
+            pendingEmailRef.current = emailLower;
+
+            toast.success(`Verification code sent to ${emailLower}`);
+            setAttempts(0);
+            setOtp(Array(OTP_LENGTH).fill(""));
+            autoSubmitRef.current = false;
+            setStep("otp");
+            startResendCooldown();
+            setTimeout(() => document.getElementById("otp-0")?.focus(), 500);
 
         } catch (err: any) {
             setLoading(false);
             toast.error("Something went wrong. Please try again.");
-            console.error("Staff login error:", err);
         }
     };
 
+    // ── Step 2 (cashier only): verify OTP ────────────────────────────────────
+    const submitOtp = async (token: string) => {
+        setOtpErrors({});
+        setLoading(true);
+
+        const { error } = await supabase.auth.verifyOtp({
+            email: pendingEmailRef.current,
+            token,
+            type: "email",
+        });
+
+        if (error) {
+            const newAttempts = attempts + 1;
+            setAttempts(newAttempts);
+            setLoading(false);
+            triggerShake();
+
+            if (newAttempts >= MAX_ATTEMPTS) {
+                toast.error("Too many failed attempts. Please sign in again.", { duration: 3500 });
+                setLoading(true);
+                setTimeout(() => {
+                    setStep("login");
+                    setOtp(Array(OTP_LENGTH).fill(""));
+                    setAttempts(0);
+                    setOtpErrors({});
+                    autoSubmitRef.current = false;
+                    setLoading(false);
+                }, 2200);
+            } else {
+                const remaining = MAX_ATTEMPTS - newAttempts;
+                toast.error(`Wrong code — ${remaining} attempt${remaining === 1 ? "" : "s"} left.`);
+                setOtpErrors({ otp: `Invalid code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.` });
+                setOtp(Array(OTP_LENGTH).fill(""));
+                autoSubmitRef.current = false;
+                setTimeout(() => document.getElementById("otp-0")?.focus(), 80);
+            }
+            return;
+        }
+
+        // OTP verified — sign session and redirect cashier
+        const staff = pendingStaffRef.current;
+        if (typeof window !== "undefined") {
+            sessionStorage.setItem("staff_session", JSON.stringify({
+                id: staff.id, full_name: staff.full_name, email: staff.email,
+                role: staff.role, owner_id: staff.owner_id, logged_in_at: Date.now(),
+            }));
+        }
+        setLoading(false);
+        toast.success(`Verified! Welcome, ${staff.full_name} 🎉`);
+        setTimeout(() => router.push("/staff/cashier"), 1000);
+    };
+
+    const handleOtpSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const token = otp.join("");
+        if (token.length < OTP_LENGTH) {
+            setOtpErrors({ otp: `Please enter all ${OTP_LENGTH} digits.` });
+            return;
+        }
+        if (!autoSubmitRef.current) {
+            autoSubmitRef.current = true;
+            await submitOtp(token);
+        }
+    };
+
+    const handleOtpChange = (index: number, value: string) => {
+        if (!/^\d*$/.test(value) || loading) return;
+        const next = [...otp];
+        next[index] = value.slice(-1);
+        setOtp(next);
+        setOtpErrors({});
+        if (value && index < OTP_LENGTH - 1) document.getElementById(`otp-${index + 1}`)?.focus();
+    };
+
+    const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
+        if (e.key === "Backspace" && !otp[index] && index > 0)
+            document.getElementById(`otp-${index - 1}`)?.focus();
+    };
+
+    const handleOtpPaste = (e: React.ClipboardEvent) => {
+        e.preventDefault();
+        const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, OTP_LENGTH);
+        if (pasted.length === OTP_LENGTH) {
+            setOtp(pasted.split(""));
+            document.getElementById(`otp-${OTP_LENGTH - 1}`)?.focus();
+        }
+    };
+
+    const triggerShake = () => {
+        setShake(true);
+        setTimeout(() => setShake(false), 600);
+    };
+
+    const startResendCooldown = () => {
+        setResendCooldown(60);
+        const interval = setInterval(() => {
+            setResendCooldown(prev => {
+                if (prev <= 1) { clearInterval(interval); return 0; }
+                return prev - 1;
+            });
+        }, 1000);
+    };
+
+    const handleResend = async () => {
+        if (resendCooldown > 0 || loading) return;
+        setLoading(true);
+        const { error } = await supabase.auth.signInWithOtp({
+            email: pendingEmailRef.current,
+            options: { shouldCreateUser: false },
+        });
+        setLoading(false);
+        if (error) { toast.error("Failed to resend code."); return; }
+        toast.success("New code sent!");
+        setOtp(Array(OTP_LENGTH).fill(""));
+        setAttempts(0);
+        setOtpErrors({});
+        autoSubmitRef.current = false;
+        startResendCooldown();
+        setTimeout(() => document.getElementById("otp-0")?.focus(), 50);
+    };
+
+    // ── Role cards ─────────────────────────────────────────────────────────────
     const roles = [
-        {
-            id: "staff" as PortalRole,
-            label: "Staff Worker",
-            desc: "Inventory & operations",
-            icon: <Users size={22} />,
-            color: "#7c3aed",
-            activeBg: "rgba(124,58,237,0.07)",
-            activeBorder: "#7c3aed",
-            activeGlow: "rgba(124,58,237,0.15)",
-        },
-        {
-            id: "cashier" as PortalRole,
-            label: "Cashier",
-            desc: "POS & transactions",
-            icon: <ShoppingCart size={22} />,
-            color: "#0891b2",
-            activeBg: "rgba(8,145,178,0.07)",
-            activeBorder: "#0891b2",
-            activeGlow: "rgba(8,145,178,0.15)",
-        },
+        { id: "staff" as PortalRole, label: "Staff Worker", desc: "Inventory & operations", icon: <Users size={22} />, color: "#7c3aed", activeBg: "rgba(124,58,237,0.07)", activeBorder: "#7c3aed", activeGlow: "rgba(124,58,237,0.15)" },
+        { id: "cashier" as PortalRole, label: "Cashier", desc: "POS & transactions", icon: <ShoppingCart size={22} />, color: "#0891b2", activeBg: "rgba(8,145,178,0.07)", activeBorder: "#0891b2", activeGlow: "rgba(8,145,178,0.15)" },
     ];
 
-    const activeGrad = selectedRole === "cashier" ? "linear-gradient(135deg, #0891b2, #0e7490)" : "linear-gradient(135deg, #7c3aed, #6d28d9)";
-    const activeShadow = selectedRole === "cashier" ? "0 8px 24px rgba(8,145,178,0.35)" : "0 8px 24px rgba(124,58,237,0.35)";
+    const activeGrad = selectedRole === "cashier"
+        ? "linear-gradient(135deg, #0891b2, #0e7490)"
+        : "linear-gradient(135deg, #7c3aed, #6d28d9)";
+    const activeShadow = selectedRole === "cashier"
+        ? "0 8px 24px rgba(8,145,178,0.35)"
+        : "0 8px 24px rgba(124,58,237,0.35)";
+
+    // ── Left panel ─────────────────────────────────────────────────────────────
+    const LeftPanel = () => (
+        <aside className="hidden lg:flex w-[440px] flex-shrink-0 flex-col relative overflow-hidden"
+            style={{ background: "linear-gradient(155deg,#1e0a3c 0%,#2d1060 55%,#4c1d95 100%)" }}>
+            <div className="absolute inset-0 pointer-events-none opacity-[0.07]"
+                style={{ backgroundImage: "linear-gradient(rgba(255,255,255,1) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,1) 1px,transparent 1px)", backgroundSize: "32px 32px", animation: "gridFloat 30s linear infinite" }} />
+            <div className="absolute pointer-events-none" style={{ top: -100, right: -100, width: 460, height: 460, background: "radial-gradient(circle,rgba(167,139,250,0.22) 0%,transparent 65%)" }} />
+            <div className="absolute pointer-events-none" style={{ bottom: -80, left: -80, width: 380, height: 380, background: "radial-gradient(circle,rgba(8,145,178,0.14) 0%,transparent 65%)" }} />
+
+            <div className="relative z-10 flex flex-col h-full p-10">
+                <Link href="/" className="flex items-center gap-3 no-underline">
+                    <div className="relative w-10 h-10 flex-shrink-0">
+                        <Image src="/images/logo.png" alt="SariSari IMS" fill className="object-contain rounded-xl" sizes="40px" />
+                    </div>
+                    <div>
+                        <div className="text-white font-black text-lg leading-none" style={{ fontFamily: "Syne,sans-serif" }}>
+                            SariSari<span className="text-violet-400">.</span>IMS
+                        </div>
+                        <div className="text-white/30 text-[0.5rem] font-bold uppercase tracking-widest mt-0.5">Team Portal</div>
+                    </div>
+                </Link>
+
+                <div className="my-auto">
+                    <div className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 mb-7"
+                        style={{ background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.25)" }}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-400" style={{ boxShadow: "0 0 8px #a78bfa" }} />
+                        <span className="text-violet-300 text-[0.65rem] font-bold uppercase tracking-[0.15em]">Staff &amp; Cashier Access</span>
+                    </div>
+
+                    <h2 className="font-black text-white leading-[1.08] mb-4"
+                        style={{ fontFamily: "Syne,sans-serif", fontSize: "2.7rem", letterSpacing: "-0.03em" }}>
+                        Ready for<br />
+                        <span className="text-transparent bg-clip-text"
+                            style={{ backgroundImage: "linear-gradient(135deg,#a78bfa,#67e8f9)" }}>
+                            your shift?
+                        </span>
+                    </h2>
+
+                    <p className="text-slate-300/65 text-[0.9rem] leading-relaxed mb-8 max-w-[310px]">
+                        Choose your role and sign in with your store email and assigned PIN code.
+                    </p>
+
+                    {/* Role info */}
+                    <div className="space-y-4 mb-8">
+                        {[
+                            { icon: <Users size={16} />, label: "Staff Worker", desc: "Manage inventory & daily operations — PIN only", color: "#a78bfa", badge: null },
+                            { icon: <ShoppingCart size={16} />, label: "Cashier", desc: "Process sales & transactions — PIN + 2FA required", color: "#67e8f9", badge: "2FA" },
+                        ].map(item => (
+                            <div key={item.label} className="flex items-center gap-3.5">
+                                <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                                    style={{ background: "rgba(255,255,255,0.07)", color: item.color }}>
+                                    {item.icon}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-white/80 text-[0.83rem] font-bold">{item.label}</span>
+                                        {item.badge && (
+                                            <span className="text-[0.55rem] font-black px-1.5 py-0.5 rounded-full"
+                                                style={{ background: "rgba(103,232,249,0.15)", color: "#67e8f9", border: "1px solid rgba(103,232,249,0.25)" }}>
+                                                {item.badge}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="text-white/35 text-[0.71rem]">{item.desc}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Attendance policy */}
+                    <div className="p-4 rounded-2xl"
+                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                        <p className="text-teal-300 text-[0.7rem] font-black uppercase tracking-widest mb-2.5">
+                            Attendance Policy
+                        </p>
+                        <div className="space-y-1.5">
+                            {[
+                                { dot: "#10b981", label: "On Time", desc: "Login at or before 8:00 AM" },
+                                { dot: "#f59e0b", label: "Late", desc: "Login 8:01 AM – 12:00 PM" },
+                                { dot: "#ef4444", label: "Absent", desc: "No login by 12:00 PM (auto-marked)" },
+                                { dot: "#94a3b8", label: "OFF", desc: "Every Sunday (REST) or PH Holiday" },
+                            ].map(r => (
+                                <div key={r.label} className="flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: r.dot }} />
+                                    <span className="text-white/60 text-[0.68rem]">
+                                        <span className="font-bold text-white/80">{r.label}</span> — {r.desc}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="pt-6 border-t border-white/10">
+                    <p className="text-white/25 text-[0.7rem]">
+                        Having trouble? Contact your store owner for your PIN.
+                    </p>
+                </div>
+            </div>
+        </aside>
+    );
 
     return (
         <>
@@ -173,216 +445,438 @@ export default function StaffCashierLoginPage() {
                 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Syne:wght@700;800;900&display=swap');
                 * { font-family: 'Plus Jakarta Sans', sans-serif; }
                 h1, h2, h3 { font-family: 'Syne', sans-serif; }
-                @keyframes shimmerBar { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                @keyframes gridFloat  { 0% { background-position: 0 0; } 100% { background-position: 40px 40px; } }
+                @keyframes shimmerBar { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+                @keyframes gridFloat { 0%{background-position:0 0} 100%{background-position:40px 40px} }
+                @keyframes floatUp { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+                .otp-input:focus { border-color: #0891b2 !important; box-shadow: 0 0 0 3px rgba(8,145,178,0.12) !important; }
             `}</style>
 
             <div className="min-h-screen flex" style={{ background: "#F7F9FC" }}>
+                <LeftPanel />
 
-                {/* Left panel */}
-                <aside className="hidden lg:flex w-[440px] flex-shrink-0 flex-col relative overflow-hidden"
-                    style={{ background: "linear-gradient(155deg, #1e0a3c 0%, #2d1060 55%, #4c1d95 100%)" }}>
-                    <div className="absolute inset-0 pointer-events-none opacity-[0.07]"
-                        style={{ backgroundImage: "linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)", backgroundSize: "32px 32px", animation: "gridFloat 30s linear infinite" }} />
-                    <div className="absolute pointer-events-none" style={{ top: -100, right: -100, width: 460, height: 460, background: "radial-gradient(circle, rgba(167,139,250,0.22) 0%, transparent 65%)" }} />
-                    <div className="absolute pointer-events-none" style={{ bottom: -80, left: -80, width: 380, height: 380, background: "radial-gradient(circle, rgba(8,145,178,0.14) 0%, transparent 65%)" }} />
-
-                    <div className="relative z-10 flex flex-col h-full p-10">
-                        <Link href="/" className="flex items-center gap-3 no-underline">
-                            <div className="relative w-10 h-10 flex-shrink-0">
-                                <Image src="/images/logo.png" alt="SariSari IMS" fill className="object-contain rounded-xl" sizes="40px" />
-                            </div>
-                            <div>
-                                <div className="text-white font-black text-lg leading-none" style={{ fontFamily: "Syne, sans-serif" }}>SariSari<span className="text-violet-400">.</span>IMS</div>
-                                <div className="text-white/30 text-[0.5rem] font-bold uppercase tracking-widest mt-0.5">Team Portal</div>
-                            </div>
-                        </Link>
-
-                        <div className="my-auto">
-                            <div className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 mb-7"
-                                style={{ background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.25)" }}>
-                                <span className="w-1.5 h-1.5 rounded-full bg-violet-400" style={{ boxShadow: "0 0 8px #a78bfa" }} />
-                                <span className="text-violet-300 text-[0.65rem] font-bold uppercase tracking-[0.15em]">Staff &amp; Cashier Access</span>
-                            </div>
-                            <h2 className="font-black text-white leading-[1.08] mb-4"
-                                style={{ fontFamily: "Syne, sans-serif", fontSize: "2.7rem", letterSpacing: "-0.03em" }}>
-                                Ready for<br />
-                                <span className="text-transparent bg-clip-text" style={{ backgroundImage: "linear-gradient(135deg, #a78bfa, #67e8f9)" }}>your shift?</span>
-                            </h2>
-                            <p className="text-slate-300/65 text-[0.9rem] leading-relaxed mb-10 max-w-[310px]">
-                                Choose your role and sign in with your store email and assigned PIN code.
-                            </p>
-                            <div className="space-y-5">
-                                {[
-                                    { icon: <Users size={16} />, label: "Staff Worker", desc: "Manage inventory & daily operations", color: "#a78bfa" },
-                                    { icon: <ShoppingCart size={16} />, label: "Cashier", desc: "Process sales & handle transactions", color: "#67e8f9" },
-                                ].map(item => (
-                                    <div key={item.label} className="flex items-center gap-3.5">
-                                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-                                            style={{ background: "rgba(255,255,255,0.07)", color: item.color }}>{item.icon}</div>
-                                        <div>
-                                            <div className="text-white/80 text-[0.83rem] font-bold">{item.label}</div>
-                                            <div className="text-white/35 text-[0.72rem]">{item.desc}</div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="pt-6 border-t border-white/10">
-                            <p className="text-white/25 text-[0.7rem]">Having trouble? Contact your store owner for your PIN.</p>
-                        </div>
-                    </div>
-                </aside>
-
-                {/* Right: form */}
                 <main className="flex-1 flex items-center justify-center p-6 md:p-10 overflow-y-auto">
-                    <motion.div
-                        initial={{ opacity: 0, y: 22 }} animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-                        className="w-full max-w-[430px]"
-                    >
-                        {/* Mobile logo */}
-                        <Link href="/" className="lg:hidden flex items-center gap-2.5 no-underline mb-8">
-                            <div className="relative w-8 h-8">
-                                <Image src="/images/logo.png" alt="Logo" fill className="object-contain rounded-lg" sizes="32px" />
-                            </div>
-                            <span className="font-black text-slate-900 text-base" style={{ fontFamily: "Syne, sans-serif" }}>
-                                SariSari<span className="text-violet-600">.</span>IMS
-                            </span>
-                        </Link>
+                    <AnimatePresence mode="wait">
 
-                        <div className="mb-7">
-                            <h1 className="font-black text-slate-900 leading-[1.1] mb-1.5"
-                                style={{ fontFamily: "Syne, sans-serif", fontSize: "1.95rem", letterSpacing: "-0.03em" }}>
-                                Team Sign In
-                            </h1>
-                            <p className="text-slate-400 text-[0.88rem]">Select your role, then enter your email and PIN.</p>
-                        </div>
+                        {/* ══════════════════════════════════════════
+                            LOCK SCREEN
+                        ══════════════════════════════════════════ */}
+                        {IS_LOCKED && lockInfo && (
+                            <motion.div key="locked"
+                                initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.96 }}
+                                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                                className="w-full max-w-[430px] flex flex-col items-center text-center py-6">
 
-                        {/* Role selector */}
-                        <div className="mb-5">
-                            <label className="block text-[0.75rem] font-bold text-slate-500 uppercase tracking-wider mb-2.5">I am a…</label>
-                            <div className="grid grid-cols-2 gap-3">
-                                {roles.map(r => {
-                                    const isActive = selectedRole === r.id;
-                                    return (
-                                        <button key={r.id} type="button"
-                                            onClick={() => { setSelectedRole(r.id); setErrors(v => ({ ...v, role: undefined, mismatch: undefined })); }}
-                                            className="relative flex flex-col items-start p-4 rounded-2xl transition-all duration-200 text-left focus:outline-none"
-                                            style={{
-                                                background: isActive ? r.activeBg : "white",
-                                                border: isActive ? `2px solid ${r.activeBorder}` : "2px solid #e8edf3",
-                                                boxShadow: isActive ? `0 0 0 4px ${r.activeGlow}` : "0 1px 3px rgba(0,0,0,0.04)",
-                                            }}>
-                                            <AnimatePresence>
-                                                {isActive && (
-                                                    <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}
-                                                        transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                                                        className="absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center"
-                                                        style={{ background: r.color }}>
-                                                        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                                                            <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                                                        </svg>
-                                                    </motion.div>
-                                                )}
-                                            </AnimatePresence>
-                                            <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3 transition-all duration-200"
-                                                style={{ background: isActive ? r.color : "#f1f5f9", color: isActive ? "white" : "#94a3b8" }}>
-                                                {r.icon}
-                                            </div>
-                                            <div className="font-bold text-[0.85rem] text-slate-800 leading-tight">{r.label}</div>
-                                            <div className="text-[0.71rem] text-slate-400 mt-0.5 leading-tight">{r.desc}</div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-
-                            <AnimatePresence>
-                                {errors.role && (
-                                    <motion.p key="role-err" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                                        className="text-[0.75rem] text-red-500 font-semibold mt-2 pl-1">⚠ {errors.role}</motion.p>
-                                )}
-                            </AnimatePresence>
-
-                            <AnimatePresence>
-                                {errors.mismatch && (
-                                    <motion.div key="mismatch" initial={{ opacity: 0, y: -6, height: 0 }} animate={{ opacity: 1, y: 0, height: "auto" }}
-                                        exit={{ opacity: 0, height: 0 }} className="mt-3 p-3.5 rounded-xl overflow-hidden"
-                                        style={{ background: "#fff7ed", border: "1.5px solid #fed7aa" }}>
-                                        <p className="text-[0.78rem] font-bold text-orange-700 mb-1">⚠ Wrong portal selected</p>
-                                        <p className="text-[0.73rem] text-orange-600 mb-2">
-                                            Your PIN is correct, but your account is a{" "}
-                                            <strong className="capitalize">{errors.mismatch.actualRole}</strong>{" "}account. Switch to the correct portal:
-                                        </p>
-                                        <button type="button"
-                                            onClick={() => { setSelectedRole(errors.mismatch!.actualRole === "cashier" ? "cashier" : "staff"); setErrors({}); }}
-                                            className="text-[0.75rem] font-black text-orange-700 underline underline-offset-2 hover:text-orange-900 transition-colors">
-                                            Switch to {errors.mismatch.actualRole === "cashier" ? "Cashier" : "Staff"} portal →
-                                        </button>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-
-                        {/* Form */}
-                        <form onSubmit={handleSubmit} noValidate className="space-y-4">
-                            {/* Email */}
-                            <div>
-                                <label className="block text-[0.78rem] font-bold text-slate-700 mb-1.5">Email Address</label>
-                                <div className="relative">
-                                    <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                                        style={{ color: errors.email ? "#ef4444" : "#94a3b8" }} />
-                                    <input type="email" placeholder="your@email.com" value={form.email} autoComplete="email"
-                                        onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setErrors(v => ({ ...v, email: undefined })); }}
-                                        className="w-full pl-10 pr-4 py-3 rounded-xl text-[0.9rem] text-slate-800 bg-white outline-none transition-all"
-                                        style={{ border: errors.email ? "1.5px solid #ef4444" : "1.5px solid #e2e8f0", boxShadow: errors.email ? "0 0 0 3px rgba(239,68,68,0.08)" : "none" }} />
+                                <div className="w-24 h-24 rounded-3xl flex items-center justify-center mb-6 text-5xl select-none"
+                                    style={{ background: `${lockInfo.color}12`, border: `2px solid ${lockInfo.color}28`, animation: "floatUp 3s ease-in-out infinite" }}>
+                                    {lockInfo.emoji}
                                 </div>
-                                {errors.email && <p className="text-[0.74rem] text-red-500 font-semibold mt-1">{errors.email}</p>}
-                            </div>
 
-                            {/* PIN */}
-                            <div>
-                                <label className="block text-[0.78rem] font-bold text-slate-700 mb-1.5">PIN Code</label>
-                                <div className="relative">
-                                    <Hash size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                                        style={{ color: errors.pin ? "#ef4444" : "#94a3b8" }} />
-                                    <input type={showPin ? "text" : "password"} inputMode="numeric" placeholder="Enter your 4-digit PIN"
-                                        value={form.pin} maxLength={4} autoComplete="current-password"
-                                        onChange={e => { setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) })); setErrors(v => ({ ...v, pin: undefined })); }}
-                                        className="w-full pl-10 pr-11 py-3 rounded-xl text-[0.9rem] text-slate-800 bg-white outline-none transition-all"
-                                        style={{ border: errors.pin ? "1.5px solid #ef4444" : "1.5px solid #e2e8f0", boxShadow: errors.pin ? "0 0 0 3px rgba(239,68,68,0.08)" : "none", letterSpacing: form.pin && !showPin ? "0.4em" : "normal" }} />
-                                    <button type="button" onClick={() => setShowPin(v => !v)}
-                                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
-                                        {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-4"
+                                    style={{ background: `${lockInfo.color}10`, border: `1.5px solid ${lockInfo.color}28` }}>
+                                    <span className="w-2 h-2 rounded-full" style={{ background: lockInfo.color }} />
+                                    <span className="text-[0.7rem] font-black uppercase tracking-widest" style={{ color: lockInfo.color }}>
+                                        {TODAY_STATUS.type === "workday" ? "Portal Closed" : "Day Off"}
+                                    </span>
+                                </div>
+
+                                <h1 className="font-black text-slate-900 text-[1.8rem] mb-2 leading-tight"
+                                    style={{ fontFamily: "Syne,sans-serif" }}>{lockInfo.headline}</h1>
+                                <p className="text-slate-400 text-[0.88rem] max-w-[300px] leading-relaxed mb-8">{lockInfo.sub}</p>
+
+                                <div className="w-full p-4 rounded-2xl text-left mb-6"
+                                    style={{ background: `${lockInfo.color}07`, border: `1.5px solid ${lockInfo.color}20` }}>
+                                    {TODAY_STATUS.type === "workday" && PAST_NOON && (
+                                        <div className="space-y-1">
+                                            <p className="text-[0.78rem] font-black text-slate-800">🕛 Noon cutoff reached</p>
+                                            <p className="text-[0.72rem] text-slate-500 leading-relaxed">
+                                                Staff without a login before 12:00 PM will be automatically marked <span className="font-black text-red-500">Absent</span>.
+                                            </p>
+                                        </div>
+                                    )}
+                                    {TODAY_STATUS.type === "sunday" && (
+                                        <div className="space-y-1">
+                                            <p className="text-[0.78rem] font-black text-slate-800">😴 Sunday — REST DAY</p>
+                                            <p className="text-[0.72rem] text-slate-500 leading-relaxed">
+                                                Every Sunday is a scheduled rest day. The portal reopens Monday before 12:00 PM.
+                                            </p>
+                                        </div>
+                                    )}
+                                    {TODAY_STATUS.type === "holiday" && (
+                                        <div className="space-y-1">
+                                            <p className="text-[0.78rem] font-black text-slate-800">🇵🇭 Philippine Public Holiday</p>
+                                            <p className="text-[0.72rem] text-slate-500 leading-relaxed">
+                                                <span className="font-black">{(TODAY_STATUS as any).label}</span> — the store is closed today. Enjoy the holiday!
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <p className="text-[0.72rem] text-slate-400 font-medium">
+                                    Portal is available on working days, before 12:00 PM.
+                                </p>
+                            </motion.div>
+                        )}
+
+                        {/* ══════════════════════════════════════════
+                            STEP 1 — ROLE + PIN LOGIN
+                        ══════════════════════════════════════════ */}
+                        {!IS_LOCKED && step === "login" && (
+                            <motion.div key="login"
+                                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
+                                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                                className="w-full max-w-[430px]">
+
+                                {/* Mobile logo */}
+                                <Link href="/" className="lg:hidden flex items-center gap-2.5 no-underline mb-8">
+                                    <div className="relative w-8 h-8">
+                                        <Image src="/images/logo.png" alt="Logo" fill className="object-contain rounded-lg" sizes="32px" />
+                                    </div>
+                                    <span className="font-black text-slate-900 text-base" style={{ fontFamily: "Syne,sans-serif" }}>
+                                        SariSari<span className="text-violet-600">.</span>IMS
+                                    </span>
+                                </Link>
+
+                                <div className="mb-7">
+                                    <h1 className="font-black text-slate-900 leading-[1.1] mb-1.5"
+                                        style={{ fontFamily: "Syne,sans-serif", fontSize: "1.95rem", letterSpacing: "-0.03em" }}>
+                                        Team Sign In
+                                    </h1>
+                                    <p className="text-slate-400 text-[0.88rem]">Select your role, then enter your email and PIN.</p>
+                                    <p className="text-teal-600 text-[0.75rem] font-bold mt-1 flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block" />
+                                        Time-in is recorded automatically when you reach your dashboard.
+                                    </p>
+                                </div>
+
+                                {/* Role selector */}
+                                <div className="mb-5">
+                                    <label className="block text-[0.75rem] font-bold text-slate-500 uppercase tracking-wider mb-2.5">
+                                        I am a…
+                                    </label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {roles.map(r => {
+                                            const isActive = selectedRole === r.id;
+                                            return (
+                                                <button key={r.id} type="button"
+                                                    onClick={() => { setSelectedRole(r.id); setErrors(v => ({ ...v, role: undefined, mismatch: undefined })); }}
+                                                    className="relative flex flex-col items-start p-4 rounded-2xl transition-all duration-200 text-left focus:outline-none"
+                                                    style={{
+                                                        background: isActive ? r.activeBg : "white",
+                                                        border: isActive ? `2px solid ${r.activeBorder}` : "2px solid #e8edf3",
+                                                        boxShadow: isActive ? `0 0 0 4px ${r.activeGlow}` : "0 1px 3px rgba(0,0,0,0.04)",
+                                                    }}>
+                                                    <AnimatePresence>
+                                                        {isActive && (
+                                                            <motion.div
+                                                                initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }}
+                                                                transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                                                                className="absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center"
+                                                                style={{ background: r.color }}>
+                                                                <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                                                                    <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                                                </svg>
+                                                            </motion.div>
+                                                        )}
+                                                    </AnimatePresence>
+                                                    <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3 transition-all duration-200"
+                                                        style={{ background: isActive ? r.color : "#f1f5f9", color: isActive ? "white" : "#94a3b8" }}>
+                                                        {r.icon}
+                                                    </div>
+                                                    <div className="font-bold text-[0.85rem] text-slate-800 leading-tight">{r.label}</div>
+                                                    <div className="text-[0.71rem] text-slate-400 mt-0.5 leading-tight">{r.desc}</div>
+                                                    {/* 2FA badge on cashier */}
+                                                    {r.id === "cashier" && (
+                                                        <span className="mt-1.5 text-[0.58rem] font-black px-1.5 py-0.5 rounded-full"
+                                                            style={{ background: isActive ? "rgba(8,145,178,0.15)" : "#f1f5f9", color: isActive ? "#0891b2" : "#94a3b8" }}>
+                                                            + 2FA required
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <AnimatePresence>
+                                        {errors.role && (
+                                            <motion.p key="role-err"
+                                                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                                                className="text-[0.75rem] text-red-500 font-semibold mt-2 pl-1">
+                                                ⚠ {errors.role}
+                                            </motion.p>
+                                        )}
+                                    </AnimatePresence>
+
+                                    <AnimatePresence>
+                                        {errors.mismatch && (
+                                            <motion.div key="mismatch"
+                                                initial={{ opacity: 0, y: -6, height: 0 }} animate={{ opacity: 1, y: 0, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+                                                className="mt-3 p-3.5 rounded-xl overflow-hidden"
+                                                style={{ background: "#fff7ed", border: "1.5px solid #fed7aa" }}>
+                                                <p className="text-[0.78rem] font-bold text-orange-700 mb-1">⚠ Wrong portal selected</p>
+                                                <p className="text-[0.73rem] text-orange-600 mb-2">
+                                                    Your PIN is correct, but your account is a <strong className="capitalize">{errors.mismatch.actualRole}</strong> account.
+                                                </p>
+                                                <button type="button"
+                                                    onClick={() => { setSelectedRole(errors.mismatch!.actualRole === "cashier" ? "cashier" : "staff"); setErrors({}); }}
+                                                    className="text-[0.75rem] font-black text-orange-700 underline underline-offset-2 hover:text-orange-900 transition-colors">
+                                                    Switch to {errors.mismatch.actualRole === "cashier" ? "Cashier" : "Staff"} portal →
+                                                </button>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+
+                                {/* Form */}
+                                <form onSubmit={handleSubmit} noValidate className="space-y-4">
+                                    <div>
+                                        <label className="block text-[0.78rem] font-bold text-slate-700 mb-1.5">Email Address</label>
+                                        <div className="relative">
+                                            <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                                style={{ color: errors.email ? "#ef4444" : "#94a3b8" }} />
+                                            <input type="email" placeholder="your@email.com" value={form.email} autoComplete="email"
+                                                onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setErrors(v => ({ ...v, email: undefined })); }}
+                                                className="w-full pl-10 pr-4 py-3 rounded-xl text-[0.9rem] text-slate-800 bg-white outline-none transition-all"
+                                                style={{ border: errors.email ? "1.5px solid #ef4444" : "1.5px solid #e2e8f0", boxShadow: errors.email ? "0 0 0 3px rgba(239,68,68,0.08)" : "none" }} />
+                                        </div>
+                                        {errors.email && <p className="text-[0.74rem] text-red-500 font-semibold mt-1">{errors.email}</p>}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-[0.78rem] font-bold text-slate-700 mb-1.5">PIN Code</label>
+                                        <div className="relative">
+                                            <Hash size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                                style={{ color: errors.pin ? "#ef4444" : "#94a3b8" }} />
+                                            <input type={showPin ? "text" : "password"} inputMode="numeric"
+                                                placeholder="Enter your 4-digit PIN"
+                                                value={form.pin} maxLength={4} autoComplete="current-password"
+                                                onChange={e => { setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) })); setErrors(v => ({ ...v, pin: undefined })); }}
+                                                className="w-full pl-10 pr-11 py-3 rounded-xl text-[0.9rem] text-slate-800 bg-white outline-none transition-all"
+                                                style={{ border: errors.pin ? "1.5px solid #ef4444" : "1.5px solid #e2e8f0", boxShadow: errors.pin ? "0 0 0 3px rgba(239,68,68,0.08)" : "none", letterSpacing: form.pin && !showPin ? "0.4em" : "normal" }} />
+                                            <button type="button" onClick={() => setShowPin(v => !v)}
+                                                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                                                {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                                            </button>
+                                        </div>
+                                        {errors.pin && <p className="text-[0.74rem] text-red-500 font-semibold mt-1">{errors.pin}</p>}
+                                    </div>
+
+                                    {/* Cashier 2FA notice */}
+                                    <AnimatePresence>
+                                        {selectedRole === "cashier" && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+                                                className="overflow-hidden">
+                                                <div className="flex items-start gap-2.5 p-3 rounded-xl"
+                                                    style={{ background: "rgba(8,145,178,0.05)", border: "1px solid rgba(8,145,178,0.15)" }}>
+                                                    <KeyRound size={14} className="shrink-0 mt-0.5" style={{ color: "#0891b2" }} />
+                                                    <p className="text-[0.75rem] leading-snug font-medium" style={{ color: "#0e7490" }}>
+                                                        As a cashier, you'll receive an <strong>8-digit verification code</strong> by email after your PIN is confirmed.
+                                                    </p>
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+
+                                    <button type="submit" disabled={loading}
+                                        className="w-full relative overflow-hidden flex items-center justify-center gap-2.5 font-bold text-white py-3.5 rounded-xl transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed mt-1"
+                                        style={{ background: activeGrad, boxShadow: activeShadow, fontFamily: "Syne,sans-serif", fontSize: "0.93rem" }}>
+                                        {loading && (
+                                            <span className="absolute inset-0 pointer-events-none"
+                                                style={{ background: "linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent)", animation: "shimmerBar 1.5s ease-in-out infinite" }} />
+                                        )}
+                                        {loading ? <Loader2 size={18} className="animate-spin" /> : <><ArrowRight size={16} /> {selectedRole === "cashier" ? "Continue to Verification" : "Sign In"}</>}
                                     </button>
+                                </form>
+
+                                {/* Mobile attendance policy */}
+                                <div className="lg:hidden mt-5 p-3.5 rounded-2xl"
+                                    style={{ background: "rgba(20,184,166,0.05)", border: "1px solid rgba(20,184,166,0.15)" }}>
+                                    <p className="text-teal-700 text-[0.68rem] font-black uppercase tracking-widest mb-1.5">Attendance Policy</p>
+                                    <div className="space-y-1">
+                                        {[
+                                            { dot: "#10b981", label: "On Time", desc: "at or before 8:00 AM" },
+                                            { dot: "#f59e0b", label: "Late", desc: "8:01 AM – 12:00 PM" },
+                                            { dot: "#ef4444", label: "Absent", desc: "no login by 12:00 PM" },
+                                            { dot: "#94a3b8", label: "OFF", desc: "Sunday or PH Holiday" },
+                                        ].map(r => (
+                                            <div key={r.label} className="flex items-center gap-2">
+                                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: r.dot }} />
+                                                <span className="text-slate-500 text-[0.67rem]"><span className="font-bold text-slate-700">{r.label}</span> — {r.desc}</span>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
-                                {errors.pin && <p className="text-[0.74rem] text-red-500 font-semibold mt-1">{errors.pin}</p>}
-                            </div>
 
-                            {/* Submit */}
-                            <button type="submit" disabled={loading}
-                                className="w-full relative overflow-hidden flex items-center justify-center gap-2.5 font-bold text-white py-3.5 rounded-xl transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed mt-1"
-                                style={{ background: activeGrad, boxShadow: activeShadow, fontFamily: "Syne, sans-serif", fontSize: "0.93rem" }}>
-                                {loading && (
-                                    <span className="absolute inset-0 pointer-events-none"
-                                        style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent)", animation: "shimmerBar 1.5s ease-in-out infinite" }} />
-                                )}
-                                {loading ? <Loader2 size={18} className="animate-spin" /> : <><ArrowRight size={16} /> Sign In</>}
-                            </button>
-                        </form>
+                                <div className="flex items-center gap-3 my-5">
+                                    <div className="flex-1 h-px bg-slate-100" />
+                                    <span className="text-slate-300 text-[0.68rem] font-bold uppercase tracking-wider whitespace-nowrap">Not a staff member?</span>
+                                    <div className="flex-1 h-px bg-slate-100" />
+                                </div>
+                                <Link href="/auth/login"
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[0.83rem] font-bold text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-200 hover:bg-blue-50/40 transition-all no-underline">
+                                    Go to Owner Portal →
+                                </Link>
+                            </motion.div>
+                        )}
 
-                        <div className="flex items-center gap-3 my-6">
-                            <div className="flex-1 h-px bg-slate-100" />
-                            <span className="text-slate-300 text-[0.68rem] font-bold uppercase tracking-wider whitespace-nowrap">Not a staff member?</span>
-                            <div className="flex-1 h-px bg-slate-100" />
-                        </div>
+                        {/* ══════════════════════════════════════════
+                            STEP 2 — CASHIER OTP VERIFICATION
+                        ══════════════════════════════════════════ */}
+                        {!IS_LOCKED && step === "otp" && (
+                            <motion.div key="otp"
+                                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
+                                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                                className="w-full max-w-[460px]">
 
-                        <Link href="/auth/login"
-                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[0.83rem] font-bold text-slate-500 hover:text-blue-600 border border-slate-200 hover:border-blue-200 hover:bg-blue-50/40 transition-all no-underline">
-                            Go to Owner Portal →
-                        </Link>
-                    </motion.div>
+                                {/* Icon */}
+                                <div className="flex justify-center mb-6">
+                                    <motion.div
+                                        animate={shake ? { x: [-6, 6, -5, 5, -3, 3, 0] } : { x: 0 }}
+                                        transition={{ duration: 0.55 }}
+                                        className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                                        style={{
+                                            background: attempts > 0 ? "linear-gradient(135deg,#fff1f2,#fee2e2)" : "linear-gradient(135deg,#ecfeff,#cffafe)",
+                                            border: attempts > 0 ? "1.5px solid #fecaca" : "1.5px solid #a5f3fc",
+                                            transition: "all 0.3s ease",
+                                        }}>
+                                        {attempts > 0
+                                            ? <AlertTriangle size={28} className="text-red-500" />
+                                            : <KeyRound size={28} style={{ color: "#0891b2" }} />}
+                                    </motion.div>
+                                </div>
+
+                                {/* Header */}
+                                <div className="mb-5 text-center">
+                                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full mb-3"
+                                        style={{ background: "rgba(8,145,178,0.08)", border: "1px solid rgba(8,145,178,0.2)" }}>
+                                        <ShoppingCart size={11} style={{ color: "#0891b2" }} />
+                                        <span className="text-[0.65rem] font-black uppercase tracking-wider" style={{ color: "#0891b2" }}>
+                                            Cashier Verification
+                                        </span>
+                                    </div>
+                                    <h1 className="font-black text-slate-900 leading-[1.1] mb-2"
+                                        style={{ fontFamily: "Syne,sans-serif", fontSize: "1.9rem", letterSpacing: "-0.03em" }}>
+                                        Check your email
+                                    </h1>
+                                    <p className="text-slate-400 text-[0.88rem] leading-relaxed">
+                                        We sent an {OTP_LENGTH}-digit code to<br />
+                                        <span className="font-bold text-slate-700">{pendingEmailRef.current}</span>
+                                    </p>
+                                </div>
+
+                                {/* Attempt indicators */}
+                                <div className="flex items-center justify-center gap-2 mb-5">
+                                    {Array.from({ length: MAX_ATTEMPTS }).map((_, i) => (
+                                        <div key={i} className="w-2 h-2 rounded-full transition-all duration-300"
+                                            style={{
+                                                background: i < attempts ? "#ef4444" : "#e2e8f0",
+                                                boxShadow: i < attempts ? "0 0 6px rgba(239,68,68,0.5)" : "none",
+                                                transform: i < attempts ? "scale(1.3)" : "scale(1)",
+                                            }} />
+                                    ))}
+                                    <span className="text-[0.72rem] font-semibold ml-1.5"
+                                        style={{ color: attempts === 0 ? "#94a3b8" : attempts === 1 ? "#f97316" : "#ef4444" }}>
+                                        {attempts === 0
+                                            ? `${MAX_ATTEMPTS} attempts allowed`
+                                            : `${MAX_ATTEMPTS - attempts} attempt${MAX_ATTEMPTS - attempts === 1 ? "" : "s"} remaining`}
+                                    </span>
+                                </div>
+
+                                {/* OTP inputs */}
+                                <form onSubmit={handleOtpSubmit} noValidate>
+                                    <motion.div
+                                        animate={shake ? { x: [-7, 7, -6, 6, -4, 4, 0] } : { x: 0 }}
+                                        transition={{ duration: 0.55 }}
+                                        className="flex gap-1.5 justify-center mb-2"
+                                        onPaste={handleOtpPaste}>
+                                        {otp.map((digit, i) => (
+                                            <input
+                                                key={i}
+                                                id={`otp-${i}`}
+                                                type="text"
+                                                inputMode="numeric"
+                                                maxLength={1}
+                                                value={digit}
+                                                disabled={loading}
+                                                onChange={e => handleOtpChange(i, e.target.value)}
+                                                onKeyDown={e => handleOtpKeyDown(i, e)}
+                                                placeholder="·"
+                                                className="otp-input text-center font-black text-slate-900 bg-white rounded-xl outline-none transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                                style={{
+                                                    width: "46px", height: "54px", fontSize: "1.2rem",
+                                                    border: otpErrors.otp ? "1.5px solid #ef4444" : digit ? "1.5px solid #67e8f9" : "1.5px solid #e2e8f0",
+                                                    background: loading ? "#f8fafc" : digit ? "#ecfeff" : "white",
+                                                    boxShadow: otpErrors.otp ? "0 0 0 3px rgba(239,68,68,0.08)" : "none",
+                                                    fontFamily: "Syne,sans-serif", transition: "all 0.15s ease",
+                                                }}
+                                            />
+                                        ))}
+                                    </motion.div>
+
+                                    <AnimatePresence>
+                                        {otpErrors.otp && (
+                                            <motion.p key="otp-error"
+                                                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                                                className="text-[0.75rem] text-red-500 text-center font-semibold mb-2 mt-1">
+                                                {otpErrors.otp}
+                                            </motion.p>
+                                        )}
+                                    </AnimatePresence>
+
+                                    <AnimatePresence>
+                                        {loading && (
+                                            <motion.div key="verifying"
+                                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                                className="flex items-center justify-center gap-2 my-3">
+                                                <Loader2 size={14} className="animate-spin" style={{ color: "#0891b2" }} />
+                                                <span className="text-[0.78rem] font-semibold" style={{ color: "#0891b2" }}>
+                                                    {attempts >= MAX_ATTEMPTS - 1 && attempts > 0 ? "Redirecting back…" : "Verifying code…"}
+                                                </span>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+
+                                    {/* Resend */}
+                                    <div className="flex items-center justify-center gap-1.5 mb-5 mt-2">
+                                        <span className="text-[0.82rem] text-slate-400">Didn't receive it?</span>
+                                        <button type="button" onClick={handleResend} disabled={resendCooldown > 0 || loading}
+                                            className="flex items-center gap-1 text-[0.82rem] font-bold transition-colors disabled:cursor-not-allowed"
+                                            style={{ color: resendCooldown > 0 || loading ? "#94a3b8" : "#0891b2" }}>
+                                            <RefreshCw size={12} />
+                                            {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
+                                        </button>
+                                    </div>
+
+                                    <button type="submit" disabled={loading || otp.join("").length < OTP_LENGTH}
+                                        className="w-full relative overflow-hidden flex items-center justify-center gap-2.5 font-bold text-white py-3.5 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        style={{ background: "linear-gradient(135deg,#0891b2,#0e7490)", boxShadow: "0 8px 24px rgba(8,145,178,0.35)", fontFamily: "Syne,sans-serif", fontSize: "0.92rem" }}>
+                                        {loading && (
+                                            <span className="absolute inset-0 pointer-events-none"
+                                                style={{ background: "linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent)", animation: "shimmerBar 1.5s ease-in-out infinite" }} />
+                                        )}
+                                        {loading ? <Loader2 size={18} className="animate-spin" /> : <><ShieldCheck size={16} />Verify & Sign In</>}
+                                    </button>
+                                </form>
+
+                                {/* Back */}
+                                <button
+                                    onClick={() => {
+                                        setStep("login");
+                                        setOtp(Array(OTP_LENGTH).fill(""));
+                                        setAttempts(0);
+                                        setOtpErrors({});
+                                        autoSubmitRef.current = false;
+                                        pendingStaffRef.current = null;
+                                    }}
+                                    disabled={loading}
+                                    className="w-full mt-3 py-3 text-[0.85rem] font-semibold text-slate-400 hover:text-slate-700 transition-colors rounded-xl hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">
+                                    ← Back to login
+                                </button>
+                            </motion.div>
+                        )}
+
+                    </AnimatePresence>
                 </main>
             </div>
         </>

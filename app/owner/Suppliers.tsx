@@ -2,15 +2,14 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
     Users, Phone, MapPin, Plus, Pencil, Trash2, X,
-    Loader2, Search, Store, ShoppingBag, User,
-    FileText, ChevronLeft, ChevronRight, Eye,
-    Package, StickyNote, CircleAlert, CheckCircle2,
-    Building2, Utensils, Info, Hash,
+    Loader2, Search, Store, ShoppingBag, User, ChevronLeft, ChevronRight, Eye,
+    Package, StickyNote, CircleAlert, Info, ChevronDown, CheckCircle2, RotateCcw,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { supabase } from "@/app/utils/supabase";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 type SupplierType = "Store" | "Market Vendor" | "Direct Person";
 
@@ -30,7 +29,7 @@ type ModalMode = "create" | "edit" | "view" | "delete" | null;
 
 const PAGE_SIZE = 9;
 
-// ─── Supplier type config ─────────────────────────────────────────────────────
+// Supplier type config
 
 const TYPE_CONFIG: Record<SupplierType, {
     icon: React.ElementType;
@@ -39,6 +38,8 @@ const TYPE_CONFIG: Record<SupplierType, {
     badge: string;
     border: string;
     headerBg: string;
+    swatch: string;
+    dot: string;
 }> = {
     "Store": {
         icon: Store,
@@ -47,6 +48,8 @@ const TYPE_CONFIG: Record<SupplierType, {
         badge: "bg-blue-100 text-blue-700",
         border: "border-blue-200",
         headerBg: "bg-blue-600",
+        swatch: "#bfdbfe",
+        dot: "#2563eb",
     },
     "Market Vendor": {
         icon: ShoppingBag,
@@ -55,6 +58,8 @@ const TYPE_CONFIG: Record<SupplierType, {
         badge: "bg-amber-100 text-amber-700",
         border: "border-amber-200",
         headerBg: "bg-amber-500",
+        swatch: "#fde68a",
+        dot: "#f59e0b",
     },
     "Direct Person": {
         icon: User,
@@ -63,18 +68,112 @@ const TYPE_CONFIG: Record<SupplierType, {
         badge: "bg-emerald-100 text-emerald-700",
         border: "border-emerald-200",
         headerBg: "bg-emerald-600",
+        swatch: "#a7f3d0",
+        dot: "#16a34a",
     },
 };
 
 const SUPPLIER_TYPES: SupplierType[] = ["Store", "Market Vendor", "Direct Person"];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
 function getInitials(name: string) {
     return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? "").join("");
 }
 
-// ─── Modal Shell ──────────────────────────────────────────────────────────────
+// DropdownSelect — same style as FeedbackView
+
+interface DropdownOption {
+    value: string;
+    label: string;
+    dot?: string;
+    swatch?: string;
+}
+
+function DropdownSelect({
+    label, value, options, onSelect, icon,
+}: {
+    label: string;
+    value: string;
+    options: DropdownOption[];
+    onSelect: (v: string) => void;
+    icon?: React.ReactNode;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+    const current = options.find(o => o.value === value);
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-white border rounded-xl text-left transition-all w-full sm:w-auto"
+                style={{
+                    border: open ? "1.5px solid #93c5fd" : "1.5px solid #e2e8f0",
+                    boxShadow: open ? "0 0 0 3px rgba(37,99,235,0.08)" : "none",
+                    minWidth: "150px",
+                }}>
+                {icon && <span className="text-slate-400">{icon}</span>}
+                <div className="flex-1 min-w-0">
+                    <p className="text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">{label}</p>
+                    <p className="text-[0.8rem] font-black text-slate-800 leading-tight truncate">
+                        {current?.value === "All" ? `All ${label}s` : (current?.label ?? "All")}
+                    </p>
+                </div>
+                <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+            </button>
+
+            <AnimatePresence>
+                {open && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 5, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 5, scale: 0.98 }}
+                        transition={{ duration: 0.13, ease: [0.22, 1, 0.36, 1] }}
+                        className="absolute top-full left-0 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 z-50 overflow-hidden"
+                        style={{ minWidth: "210px" }}>
+                        <div className="py-1.5">
+                            <p className="px-3 pt-2 pb-1.5 text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest">
+                                {label}
+                            </p>
+                            {options.map(o => (
+                                <button
+                                    key={o.value}
+                                    type="button"
+                                    onClick={() => { onSelect(o.value); setOpen(false); }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                                    {o.dot && (
+                                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: o.dot }} />
+                                    )}
+                                    {o.swatch && (
+                                        <span className="w-3 h-3 rounded shrink-0 border border-slate-200" style={{ background: o.swatch }} />
+                                    )}
+                                    <span className={`text-[0.82rem] flex-1 ${value === o.value ? "font-black text-slate-900" : "font-medium text-slate-600"}`}>
+                                        {o.label}
+                                    </span>
+                                    {value === o.value && (
+                                        <CheckCircle2 size={13} className="text-blue-500 shrink-0" />
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+// Modal shell
 
 function Modal({ open, onClose, children, wide }: {
     open: boolean; onClose: () => void; children: React.ReactNode; wide?: boolean;
@@ -86,18 +185,29 @@ function Modal({ open, onClose, children, wide }: {
     }, [onClose]);
     if (!open) return null;
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        // Bottom-sheet on mobile, centered on sm+
+        <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
             style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
             onClick={(e) => e.target === e.currentTarget && onClose()}>
-            <div className={`bg-white rounded-2xl shadow-2xl w-full flex flex-col ${wide ? "max-w-xl" : "max-w-md"}`}
-                style={{ maxHeight: "92vh" }}>
+            <motion.div
+                initial={{ opacity: 0, y: 40 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 40 }}
+                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+                className={`bg-white w-full sm:rounded-2xl rounded-t-3xl shadow-2xl flex flex-col ${wide ? "sm:max-w-xl" : "sm:max-w-md"}`}
+                style={{ maxHeight: "92dvh" }}>
+                {/* drag handle on mobile */}
+                <div className="flex justify-center pt-3 pb-0 sm:hidden">
+                    <div className="w-9 h-1 rounded-full bg-slate-200" />
+                </div>
                 {children}
-            </div>
+            </motion.div>
         </div>
     );
 }
 
-// ─── Field Error ──────────────────────────────────────────────────────────────
+// Field error
 
 function FieldError({ message }: { message?: string }) {
     if (!message) return null;
@@ -111,12 +221,12 @@ function FieldError({ message }: { message?: string }) {
 
 function inputCls(error?: string) {
     return `w-full px-4 py-3 border rounded-xl text-sm outline-none font-medium transition-all ${error
-            ? "bg-red-50 border-red-400 ring-2 ring-red-200"
-            : "bg-slate-50 border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
+        ? "bg-red-50 border-red-400 ring-2 ring-red-200"
+        : "bg-slate-50 border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-400"
         }`;
 }
 
-// ─── Supplier Form Modal ──────────────────────────────────────────────────────
+// Supplier form modal
 
 interface SupplierForm {
     name: string;
@@ -193,16 +303,16 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
 
     return (
         <Modal open onClose={onClose} wide>
-            <div className="flex flex-col" style={{ maxHeight: "92vh" }}>
+            <div className="flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className={`${cfg.headerBg} rounded-t-2xl p-6 text-white shrink-0`}>
+                <div className={`${cfg.headerBg} rounded-t-3xl sm:rounded-t-2xl p-5 sm:p-6 text-white shrink-0`}>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
                                 {React.createElement(cfg.icon, { size: 20, className: "text-white" })}
                             </div>
                             <div>
-                                <h2 className="text-lg font-black">
+                                <h2 className="text-base font-black">
                                     {mode === "create" ? "Add New Supplier" : "Edit Supplier"}
                                 </h2>
                                 <p className="text-white/80 text-xs font-medium flex items-center gap-1.5">
@@ -218,7 +328,7 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-5 space-y-5">
 
                     {/* Supplier Type */}
                     <div>
@@ -233,11 +343,11 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
                                 return (
                                     <button key={type} type="button" onClick={() => set("supplier_type", type)}
                                         className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border text-xs font-bold transition-all ${active
-                                                ? `${tcfg.headerBg} text-white border-transparent shadow-md`
-                                                : "bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                            ? `${tcfg.headerBg} text-white border-transparent shadow-md`
+                                            : "bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
                                             }`}>
                                         <Icon size={16} className={active ? "text-white" : tcfg.text} />
-                                        <span className={active ? "text-white" : "text-slate-600"}>{type}</span>
+                                        <span className={`text-center leading-tight ${active ? "text-white" : "text-slate-600"}`}>{type}</span>
                                     </button>
                                 );
                             })}
@@ -261,8 +371,8 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
 
                     {/* Phone */}
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block flex items-center gap-1.5">
-                            <Phone size={10} className="text-slate-400" /> Phone / Contact
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">
+                            Phone / Contact
                         </label>
                         <input value={form.phone} onChange={(e) => set("phone", e.target.value)}
                             placeholder="e.g. 0912 345 6789"
@@ -271,8 +381,8 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
 
                     {/* Address */}
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block flex items-center gap-1.5">
-                            <MapPin size={10} className="text-slate-400" /> Location / Address
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">
+                            Location / Address
                         </label>
                         <input value={form.address} onChange={(e) => set("address", e.target.value)}
                             placeholder={
@@ -285,8 +395,8 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
 
                     {/* Main Items */}
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block flex items-center gap-1.5">
-                            <Package size={10} className="text-slate-400" /> Main Items Supplied
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">
+                            Main Items Supplied
                         </label>
                         <input value={form.main_items} onChange={(e) => set("main_items", e.target.value)}
                             placeholder="e.g. Canned Goods, Eggs, Ice Cream, Softdrinks"
@@ -296,8 +406,8 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
 
                     {/* Notes */}
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block flex items-center gap-1.5">
-                            <StickyNote size={10} className="text-slate-400" /> Notes
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">
+                            Notes
                         </label>
                         <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)}
                             rows={3}
@@ -314,7 +424,8 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
                 </div>
 
                 {/* Footer */}
-                <div className="px-6 py-4 flex gap-3 border-t border-slate-100 bg-white rounded-b-2xl shrink-0">
+                <div className="px-5 sm:px-6 py-4 flex gap-3 border-t border-slate-100 bg-white rounded-b-2xl shrink-0"
+                    style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))" }}>
                     <button onClick={onClose}
                         className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 transition-colors">
                         Cancel
@@ -330,7 +441,7 @@ function SupplierFormModal({ mode, supplier, onClose, onSuccess }: {
     );
 }
 
-// ─── View Modal ───────────────────────────────────────────────────────────────
+// View modal
 
 function ViewModal({ supplier, onClose, onEdit }: {
     supplier: Supplier; onClose: () => void; onEdit: () => void;
@@ -341,8 +452,8 @@ function ViewModal({ supplier, onClose, onEdit }: {
 
     return (
         <Modal open onClose={onClose}>
-            <div className="flex flex-col" style={{ maxHeight: "92vh" }}>
-                <div className={`${cfg.headerBg} rounded-t-2xl p-6 shrink-0`}>
+            <div className="flex flex-col overflow-hidden">
+                <div className={`${cfg.headerBg} rounded-t-3xl sm:rounded-t-2xl p-5 sm:p-6 shrink-0`}>
                     <div className="flex items-center justify-between mb-4">
                         <span className="text-white/80 text-xs font-black uppercase tracking-widest flex items-center gap-1.5">
                             <Icon size={12} /> {supplier.supplier_type}
@@ -352,11 +463,11 @@ function ViewModal({ supplier, onClose, onEdit }: {
                         </button>
                     </div>
                     <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-                            <span className="text-2xl font-black text-white">{initials}</span>
+                        <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                            <span className="text-xl font-black text-white">{initials}</span>
                         </div>
                         <div>
-                            <h3 className="text-xl font-black text-white">{supplier.name}</h3>
+                            <h3 className="text-lg font-black text-white leading-tight">{supplier.name}</h3>
                             <p className="text-white/70 text-xs mt-0.5">
                                 Added {new Date(supplier.created_at).toLocaleDateString("en-PH", { dateStyle: "medium" })}
                             </p>
@@ -364,7 +475,7 @@ function ViewModal({ supplier, onClose, onEdit }: {
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
+                <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-5 space-y-3">
                     {[
                         { icon: Phone, label: "Phone", value: supplier.phone },
                         { icon: MapPin, label: "Address / Location", value: supplier.address },
@@ -380,24 +491,25 @@ function ViewModal({ supplier, onClose, onEdit }: {
                             </p>
                         </div>
                     ))}
+                </div>
 
-                    <div className="flex gap-2 pt-2">
-                        <button onClick={onClose}
-                            className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 transition-colors">
-                            Close
-                        </button>
-                        <button onClick={onEdit}
-                            className={`flex-1 py-3 rounded-xl ${cfg.headerBg} hover:opacity-90 text-white font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95`}>
-                            <Pencil size={14} /> Edit Supplier
-                        </button>
-                    </div>
+                <div className="px-5 sm:px-6 py-4 flex gap-3 border-t border-slate-100 bg-white rounded-b-2xl shrink-0"
+                    style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))" }}>
+                    <button onClick={onClose}
+                        className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 transition-colors">
+                        Close
+                    </button>
+                    <button onClick={onEdit}
+                        className={`flex-1 py-3 rounded-xl ${cfg.headerBg} hover:opacity-90 text-white font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95`}>
+                        <Pencil size={14} /> Edit Supplier
+                    </button>
                 </div>
             </div>
         </Modal>
     );
 }
 
-// ─── Delete Modal ─────────────────────────────────────────────────────────────
+// Delete modal
 
 function DeleteModal({ supplier, onClose, onSuccess }: {
     supplier: Supplier; onClose: () => void; onSuccess: () => void;
@@ -416,7 +528,7 @@ function DeleteModal({ supplier, onClose, onSuccess }: {
     };
     return (
         <Modal open onClose={onClose}>
-            <div className="p-6 text-center">
+            <div className="px-5 sm:px-6 py-6 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center mx-auto mb-4">
                     <Trash2 size={26} className="text-red-500" />
                 </div>
@@ -429,7 +541,7 @@ function DeleteModal({ supplier, onClose, onSuccess }: {
                         This action cannot be undone. All contact and item information for this supplier will be permanently deleted.
                     </p>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
                     <button onClick={onClose}
                         className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 transition-colors">
                         Cancel
@@ -445,7 +557,7 @@ function DeleteModal({ supplier, onClose, onSuccess }: {
     );
 }
 
-// ─── Supplier Card ────────────────────────────────────────────────────────────
+// Supplier card
 
 function SupplierCard({ supplier, onView, onEdit, onDelete }: {
     supplier: Supplier;
@@ -459,22 +571,21 @@ function SupplierCard({ supplier, onView, onEdit, onDelete }: {
 
     return (
         <div className={`bg-white rounded-2xl border ${cfg.border} shadow-sm hover:shadow-md transition-all group flex flex-col`}>
-            {/* Card header */}
-            <div className="p-5 pb-4">
-                <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                        <div className={`w-12 h-12 rounded-xl ${cfg.bg} flex items-center justify-center shrink-0 group-hover:${cfg.headerBg} transition-colors relative overflow-hidden`}>
-                            <span className={`text-lg font-black ${cfg.text} group-hover:text-white transition-colors`}>{initials}</span>
+            <div className="p-4 sm:p-5 pb-3 sm:pb-4">
+                <div className="flex items-start justify-between mb-3 sm:mb-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-11 h-11 rounded-xl ${cfg.bg} flex items-center justify-center shrink-0`}>
+                            <span className={`text-base font-black ${cfg.text}`}>{initials}</span>
                         </div>
-                        <div>
-                            <h3 className="font-bold text-slate-800 text-sm leading-tight">{supplier.name}</h3>
+                        <div className="min-w-0">
+                            <h3 className="font-bold text-slate-800 text-sm leading-tight truncate">{supplier.name}</h3>
                             <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider mt-0.5 ${cfg.text}`}>
                                 <Icon size={9} /> {supplier.supplier_type}
                             </span>
                         </div>
                     </div>
-                    {/* Action buttons */}
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* on mobile always show; on desktop show on hover */}
+                    <div className="flex items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
                         <button onClick={onView} title="View details"
                             className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all">
                             <Eye size={13} />
@@ -490,8 +601,7 @@ function SupplierCard({ supplier, onView, onEdit, onDelete }: {
                     </div>
                 </div>
 
-                {/* Info rows */}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                     {supplier.phone && (
                         <div className="flex items-center gap-2 text-xs text-slate-500">
                             <Phone size={11} className="text-slate-300 shrink-0" />
@@ -510,9 +620,8 @@ function SupplierCard({ supplier, onView, onEdit, onDelete }: {
                 </div>
             </div>
 
-            {/* Footer strip */}
             {supplier.main_items && (
-                <div className={`px-5 py-3 border-t ${cfg.border} ${cfg.bg} rounded-b-2xl mt-auto`}>
+                <div className={`px-4 sm:px-5 py-3 border-t ${cfg.border} ${cfg.bg} rounded-b-2xl mt-auto`}>
                     <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-0.5 flex items-center gap-1">
                         <Package size={8} /> Supplies
                     </p>
@@ -521,7 +630,7 @@ function SupplierCard({ supplier, onView, onEdit, onDelete }: {
             )}
 
             {supplier.notes && !supplier.main_items && (
-                <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl mt-auto">
+                <div className="px-4 sm:px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl mt-auto">
                     <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-0.5 flex items-center gap-1">
                         <StickyNote size={8} /> Note
                     </p>
@@ -532,31 +641,31 @@ function SupplierCard({ supplier, onView, onEdit, onDelete }: {
     );
 }
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
+// Stat card
 
 function StatCard({ icon: Icon, label, value, sub, palette }: {
     icon: React.ElementType; label: string; value: string; sub?: string;
     palette: { icon: string; border: string };
 }) {
     return (
-        <div className={`rounded-2xl p-5 border bg-white shadow-sm flex items-center gap-4 ${palette.border}`}>
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${palette.icon}`}>
-                <Icon size={20} />
+        <div className={`rounded-2xl p-4 sm:p-5 border bg-white shadow-sm flex items-center gap-3 sm:gap-4 ${palette.border}`}>
+            <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${palette.icon}`}>
+                <Icon size={18} />
             </div>
             <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
                 <p className="text-base font-black text-slate-800 truncate leading-tight">{value}</p>
-                {sub && <p className="text-[10px] text-slate-400 font-medium mt-0.5">{sub}</p>}
+                {sub && <p className="text-[9px] sm:text-[10px] text-slate-400 font-medium mt-0.5 hidden sm:block">{sub}</p>}
             </div>
         </div>
     );
 }
 
-// ─── Empty State ──────────────────────────────────────────────────────────────
+// Empty state
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
     return (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
+        <div className="flex flex-col items-center justify-center py-20 sm:py-24 text-center px-6">
             <div className="w-20 h-20 bg-slate-100 rounded-3xl flex items-center justify-center mb-5">
                 <Users size={36} className="text-slate-300" />
             </div>
@@ -572,9 +681,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ── MAIN COMPONENT ────────────────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════════
+// Main component
 
 export default function SupplierView() {
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -583,10 +690,7 @@ export default function SupplierView() {
     const [filterType, setFilterType] = useState<SupplierType | "All">("All");
     const [page, setPage] = useState(1);
 
-    const [modal, setModal] = useState<{
-        mode: ModalMode;
-        supplier?: Supplier;
-    }>({ mode: null });
+    const [modal, setModal] = useState<{ mode: ModalMode; supplier?: Supplier }>({ mode: null });
 
     const fetchSuppliers = useCallback(async () => {
         setLoading(true);
@@ -621,25 +725,34 @@ export default function SupplierView() {
     const vendorCount = suppliers.filter(s => s.supplier_type === "Market Vendor").length;
     const personCount = suppliers.filter(s => s.supplier_type === "Direct Person").length;
 
+    const anyFilterActive = filterType !== "All" || searchQuery.trim() !== "";
+
+    const resetFilters = () => {
+        setFilterType("All");
+        setSearch("");
+    };
+
     const closeModal = () => setModal({ mode: null });
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-500">
+        <div className="space-y-5 sm:space-y-6 pb-8" style={{ paddingBottom: "calc(2rem + env(safe-area-inset-bottom, 0px))" }}>
 
-            {/* Page Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Page header */}
+            <div className="flex items-start justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Suppliers</h1>
-                    <p className="text-sm text-slate-500 font-medium">Manage your product vendors and contact details.</p>
+                    <h1 className="text-xl sm:text-2xl font-black text-slate-900 uppercase tracking-tight">Suppliers</h1>
+                    <p className="text-sm text-slate-500 font-medium mt-0.5">Manage your product vendors and contact details.</p>
                 </div>
                 <button
                     onClick={() => setModal({ mode: "create" })}
-                    className="flex items-center gap-2 bg-slate-900 hover:bg-black text-white px-5 py-3 rounded-2xl font-bold text-sm transition-all active:scale-95 shadow-md">
-                    <Plus size={16} /> New Supplier
+                    className="flex items-center gap-2 bg-slate-900 hover:bg-black text-white px-4 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95 shadow-md shrink-0">
+                    <Plus size={15} />
+                    <span className="hidden xs:inline">New Supplier</span>
+                    <span className="xs:hidden">New</span>
                 </button>
             </div>
 
-            {/* Stat Cards */}
+            {/* Stat cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatCard icon={Users} label="Total Suppliers" value={String(suppliers.length)} sub="All vendors"
                     palette={{ icon: "bg-slate-100 text-slate-600", border: "border-slate-200" }} />
@@ -651,28 +764,53 @@ export default function SupplierView() {
                     palette={{ icon: "bg-emerald-100 text-emerald-600", border: "border-emerald-100" }} />
             </div>
 
-            {/* Toolbar */}
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between shadow-sm">
-                {/* Search */}
-                <div className="relative w-full md:w-80">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-                    <input type="text" value={searchQuery} onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search name, items, or address…"
-                        className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 ring-blue-500 outline-none" />
+            {/* Filters — dropdown style matching FeedbackView */}
+            <div className="space-y-2.5">
+                <div className="flex flex-col sm:flex-row gap-2.5">
+
+                    {/* Search — full width on mobile */}
+                    <div className="relative flex-1 sm:max-w-xs">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Search name, items, address…"
+                            className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 ring-blue-500 outline-none transition-all"
+                            style={{ border: searchQuery ? "1.5px solid #93c5fd" : "1.5px solid #e2e8f0" }}
+                        />
+                    </div>
+
+                    {/* Type filter dropdown */}
+                    <DropdownSelect
+                        label="Type"
+                        value={filterType}
+                        onSelect={v => setFilterType(v as SupplierType | "All")}
+                        options={[
+                            { value: "All", label: "All Types" },
+                            { value: "Store", label: "Store", swatch: TYPE_CONFIG["Store"].swatch },
+                            { value: "Market Vendor", label: "Market Vendor", swatch: TYPE_CONFIG["Market Vendor"].swatch },
+                            { value: "Direct Person", label: "Direct Person", swatch: TYPE_CONFIG["Direct Person"].swatch },
+                        ]}
+                    />
+
+                    {/* Reset */}
+                    {anyFilterActive && (
+                        <button onClick={resetFilters}
+                            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-[0.75rem] font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-xl transition-colors">
+                            <RotateCcw size={12} />
+                            Reset
+                        </button>
+                    )}
                 </div>
 
-                {/* Filter Tabs */}
-                <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl">
-                    {(["All", ...SUPPLIER_TYPES] as (SupplierType | "All")[]).map(type => (
-                        <button key={type} onClick={() => setFilterType(type)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${filterType === type
-                                    ? "bg-white text-slate-900 shadow-sm"
-                                    : "text-slate-500 hover:text-slate-700"
-                                }`}>
-                            {type}
-                        </button>
-                    ))}
-                </div>
+                {/* Filter summary */}
+                {anyFilterActive && (
+                    <p className="text-[0.68rem] text-slate-400 font-medium px-1">
+                        Showing <span className="font-black text-slate-700">{filtered.length}</span> of{" "}
+                        <span className="font-black text-slate-700">{suppliers.length}</span> suppliers
+                    </p>
+                )}
             </div>
 
             {/* Content */}
@@ -689,40 +827,47 @@ export default function SupplierView() {
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center py-16">
                     <Search size={36} className="text-slate-200 mb-3" />
                     <p className="text-slate-400 text-sm font-medium">No suppliers match your search.</p>
-                    <button onClick={() => { setSearch(""); setFilterType("All"); }}
+                    <button onClick={resetFilters}
                         className="mt-3 text-xs text-blue-600 font-bold hover:underline">
                         Clear filters
                     </button>
                 </div>
             ) : (
                 <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {paginated.map(supplier => (
-                            <SupplierCard
-                                key={supplier.id}
-                                supplier={supplier}
-                                onView={() => setModal({ mode: "view", supplier })}
-                                onEdit={() => setModal({ mode: "edit", supplier })}
-                                onDelete={() => setModal({ mode: "delete", supplier })}
-                            />
-                        ))}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                        <AnimatePresence>
+                            {paginated.map(supplier => (
+                                <motion.div
+                                    key={supplier.id}
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.97 }}
+                                    transition={{ duration: 0.2 }}>
+                                    <SupplierCard
+                                        supplier={supplier}
+                                        onView={() => setModal({ mode: "view", supplier })}
+                                        onEdit={() => setModal({ mode: "edit", supplier })}
+                                        onDelete={() => setModal({ mode: "delete", supplier })}
+                                    />
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
                     </div>
 
                     {/* Pagination */}
                     {totalPages > 1 && (
-                        <div className="flex items-center justify-between px-2 py-1">
+                        <div className="flex items-center justify-between px-1">
                             <p className="text-xs font-bold text-slate-400">
-                                Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+                                {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
                             </p>
                             <div className="flex items-center gap-1">
                                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
                                     className="p-2 rounded-xl hover:bg-slate-200 disabled:opacity-30 transition-colors">
                                     <ChevronLeft size={15} />
                                 </button>
-                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                                {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map(p => (
                                     <button key={p} onClick={() => setPage(p)}
-                                        className={`w-8 h-8 rounded-xl text-xs font-black transition-all ${p === page ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-200"
-                                            }`}>
+                                        className={`w-8 h-8 rounded-xl text-xs font-black transition-all ${p === page ? "bg-slate-900 text-white" : "text-slate-400 hover:bg-slate-200"}`}>
                                         {p}
                                     </button>
                                 ))}
@@ -736,23 +881,26 @@ export default function SupplierView() {
                 </>
             )}
 
-            {/* ── Modals ── */}
-            {modal.mode === "create" && (
-                <SupplierFormModal mode="create" onClose={closeModal} onSuccess={fetchSuppliers} />
-            )}
-            {modal.mode === "edit" && modal.supplier && (
-                <SupplierFormModal mode="edit" supplier={modal.supplier} onClose={closeModal} onSuccess={fetchSuppliers} />
-            )}
-            {modal.mode === "view" && modal.supplier && (
-                <ViewModal
-                    supplier={modal.supplier}
-                    onClose={closeModal}
-                    onEdit={() => setModal({ mode: "edit", supplier: modal.supplier })}
-                />
-            )}
-            {modal.mode === "delete" && modal.supplier && (
-                <DeleteModal supplier={modal.supplier} onClose={closeModal} onSuccess={fetchSuppliers} />
-            )}
+            {/* Modals */}
+            <AnimatePresence>
+                {modal.mode === "create" && (
+                    <SupplierFormModal key="create" mode="create" onClose={closeModal} onSuccess={fetchSuppliers} />
+                )}
+                {modal.mode === "edit" && modal.supplier && (
+                    <SupplierFormModal key="edit" mode="edit" supplier={modal.supplier} onClose={closeModal} onSuccess={fetchSuppliers} />
+                )}
+                {modal.mode === "view" && modal.supplier && (
+                    <ViewModal
+                        key="view"
+                        supplier={modal.supplier}
+                        onClose={closeModal}
+                        onEdit={() => setModal({ mode: "edit", supplier: modal.supplier })}
+                    />
+                )}
+                {modal.mode === "delete" && modal.supplier && (
+                    <DeleteModal key="delete" supplier={modal.supplier} onClose={closeModal} onSuccess={fetchSuppliers} />
+                )}
+            </AnimatePresence>
         </div>
     );
 }

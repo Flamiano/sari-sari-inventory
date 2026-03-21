@@ -6,14 +6,13 @@ import Sidebar from "@/app/comps/sidebar/page";
 import {
     Menu, X, User, Bell, Search, LogOut, Settings, ChevronDown,
     AlertTriangle, ChevronRight, Loader2, Package, Store,
-    ChefHat, UtensilsCrossed, ArrowRight, ShoppingCart,
+    ChefHat, UtensilsCrossed, ArrowRight, ShoppingCart, MessageSquarePlus,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 
 import { useIdleTimeout } from "@/app/utils/useIdleTimeout";
 import SignOutModal from "@/app/comps/signoutmodal/page";
-
 
 import ProductView from "./Product";
 import SupplierView from "./Suppliers";
@@ -22,8 +21,7 @@ import AnalyticsView from "./Analytics";
 import DashboardHome from "./DashboardHome";
 import SalesHistoryView from "./SalesHistory";
 import StaffView from "./Staff";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+import FeedbackView from "./feedback/page";
 
 interface Notif {
     id: string;
@@ -49,6 +47,7 @@ const CAT_ICON: Record<string, React.ElementType> = {
     "Sari-Sari": Store,
     Meryenda: UtensilsCrossed,
 };
+
 const CAT_COLOR: Record<string, string> = {
     Almusal: "bg-amber-100 text-amber-600",
     "Sari-Sari": "bg-blue-100 text-blue-600",
@@ -57,8 +56,6 @@ const CAT_COLOR: Record<string, string> = {
 
 const php = (n: number) =>
     `₱${Number(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-// ─── Search Dropdown ──────────────────────────────────────────────────────────
 
 function SearchDropdown({ results, query, loading, onNavigate, onClose }: {
     results: SearchResult[];
@@ -142,8 +139,6 @@ function SearchDropdown({ results, query, loading, onNavigate, onClose }: {
     );
 }
 
-// ─── Notification Panel ───────────────────────────────────────────────────────
-
 function NotificationPanel({ notifs, loading, onViewAll, onClose, seenIds }: {
     notifs: Notif[];
     loading: boolean;
@@ -217,21 +212,14 @@ function NotificationPanel({ notifs, loading, onViewAll, onClose, seenIds }: {
                                             Earlier
                                         </p>
                                     )}
-                                    <div className={`flex items-start gap-3 px-4 py-3 transition-colors cursor-pointer ${seen
-                                        ? "bg-white hover:bg-slate-50"
-                                        : "bg-blue-50/70 hover:bg-blue-50"
-                                        }`}>
-                                        <div className={`relative w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${n.type === "low_stock"
-                                            ? seen ? "bg-slate-100" : "bg-red-100"
-                                            : seen ? "bg-slate-100" : "bg-green-100"
-                                            }`}>
+                                    <div className={`flex items-start gap-3 px-4 py-3 transition-colors cursor-pointer ${seen ? "bg-white hover:bg-slate-50" : "bg-blue-50/70 hover:bg-blue-50"}`}>
+                                        <div className={`relative w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${n.type === "low_stock" ? seen ? "bg-slate-100" : "bg-red-100" : seen ? "bg-slate-100" : "bg-green-100"}`}>
                                             {n.type === "low_stock"
                                                 ? <AlertTriangle size={16} className={seen ? "text-slate-400" : "text-red-500"} />
                                                 : <ShoppingCart size={16} className={seen ? "text-slate-400" : "text-green-600"} />
                                             }
                                             <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${n.dot}`} />
                                         </div>
-
                                         <div className="flex-1 min-w-0">
                                             <p className={`text-xs leading-snug ${seen ? "font-medium text-slate-500" : "font-bold text-slate-800"}`}>
                                                 {n.title}
@@ -243,7 +231,6 @@ function NotificationPanel({ notifs, loading, onViewAll, onClose, seenIds }: {
                                                 {formatRelative(n.time)}
                                             </p>
                                         </div>
-
                                         {!seen && (
                                             <div className="shrink-0 mt-1.5">
                                                 <span className="w-2.5 h-2.5 rounded-full bg-blue-500 block" />
@@ -280,7 +267,19 @@ function NotificationPanel({ notifs, loading, onViewAll, onClose, seenIds }: {
     );
 }
 
-// ─── Main Layout ──────────────────────────────────────────────────────────────
+// Tracks the count of times the staff tab has been activated
+// so StaffView remounts with a fresh key each visit
+function useTabMountKey(activeTab: string, tabName: string) {
+    const countRef = useRef(0);
+    const prevTab = useRef(activeTab);
+
+    if (prevTab.current !== activeTab) {
+        if (activeTab === tabName) countRef.current += 1;
+        prevTab.current = activeTab;
+    }
+
+    return countRef.current;
+}
 
 export default function OwnerLayout() {
     const [activeTab, setActiveTab] = useState<string>("dashboard");
@@ -288,13 +287,11 @@ export default function OwnerLayout() {
     const [isSidebarOpen, setSidebarOpen] = useState(true);
     const [isProfileOpen, setProfileOpen] = useState(false);
     const [isNotifOpen, setNotifOpen] = useState(false);
-    // ─── CHANGE 2: add modal state ────────────────────────────────────────────
     const [isSignOutOpen, setSignOutOpen] = useState(false);
     const [user, setUser] = useState<any>(null);
     const [storeName, setStoreName] = useState("My Store");
     const [authReady, setAuthReady] = useState(false);
 
-    // Search
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const [searchLoading, setSearchLoading] = useState(false);
@@ -302,7 +299,6 @@ export default function OwnerLayout() {
     const searchRef = useRef<HTMLDivElement>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Notifications
     const [notifs, setNotifs] = useState<Notif[]>([]);
     const [notifLoading, setNotifLoading] = useState(false);
     const [seenNotifIds, setSeenNotifIds] = useState<Set<string>>(new Set());
@@ -311,7 +307,16 @@ export default function OwnerLayout() {
     const notifRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
 
-    // ─── CHANGE 2 cont: sign out handler called by modal ─────────────────────
+    // Each time the owner navigates TO the staffs tab, this increments.
+    // We use it as the key for <StaffView> so React fully remounts it,
+    // triggering a fresh fetch + realtime channel setup every single time.
+    const staffMountKey = useTabMountKey(activeTab, "staffs");
+
+    const handleSetActiveTab = (tab: string) => {
+        setActiveTab(tab);
+        sessionStorage.setItem("activeTab", tab);
+    };
+
     const handleSignOut = async () => {
         sessionStorage.clear();
         setActiveTab("dashboard");
@@ -319,7 +324,6 @@ export default function OwnerLayout() {
         router.push("/auth/login");
     };
 
-    // ── Idle timeout ──────────────────────────────────────────────────────────
     const handleIdle = useCallback(async () => {
         await supabase.auth.signOut();
         sessionStorage.clear();
@@ -332,8 +336,10 @@ export default function OwnerLayout() {
                 borderRadius: "12px",
                 border: "1px solid #e2e8f0",
                 borderLeft: "4px solid #ef4444",
+                background: "#fff",
+                color: "#0f172a",
             },
-            iconTheme: { primary: "#ef4444", secondary: "#fff" },
+            iconTheme: { primary: "#ef4444", secondary: "#fef2f2" },
         });
         setTimeout(() => router.push("/auth/login"), 1500);
     }, [router]);
@@ -344,14 +350,12 @@ export default function OwnerLayout() {
         disabled: !authReady,
     });
 
-    // ── Restore active tab ────────────────────────────────────────────────────
     useEffect(() => {
         const saved = sessionStorage.getItem("activeTab");
         if (saved) setActiveTab(saved);
         setTabRestored(true);
     }, []);
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
     useEffect(() => {
         const getUser = async () => {
             const { data: { session } } = await supabase.auth.getSession();
@@ -367,7 +371,6 @@ export default function OwnerLayout() {
         getUser();
     }, []);
 
-    // ── Search ────────────────────────────────────────────────────────────────
     const runSearch = useCallback(async (q: string) => {
         if (!q.trim()) { setSearchResults([]); setSearchLoading(false); return; }
         setSearchLoading(true);
@@ -396,7 +399,6 @@ export default function OwnerLayout() {
         return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
     }, [searchQuery, runSearch]);
 
-    // ── Notifications ─────────────────────────────────────────────────────────
     const fetchNotifs = useCallback(async () => {
         setNotifLoading(true);
         try {
@@ -420,6 +422,7 @@ export default function OwnerLayout() {
                 desc: `Only ${p.stock_quantity} ${p.stock_quantity === 1 ? "pc" : "pcs"} remaining · ${p.category}`,
                 time: new Date(), dot: "bg-red-500",
             }));
+
             (lowMeals.data ?? []).forEach((m: any) => all.push({
                 id: `low-meal-${m.id}`, type: "low_stock",
                 title: `Low servings: ${m.name}`,
@@ -472,12 +475,12 @@ export default function OwnerLayout() {
     }, []);
 
     useEffect(() => { fetchNotifs(); }, [fetchNotifs, activeTab]);
+
     useEffect(() => {
         const interval = setInterval(fetchNotifs, 2 * 60 * 1000);
         return () => clearInterval(interval);
     }, [fetchNotifs]);
 
-    // ── Outside click ─────────────────────────────────────────────────────────
     useEffect(() => {
         const handler = (e: MouseEvent) => {
             if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
@@ -488,7 +491,6 @@ export default function OwnerLayout() {
         return () => document.removeEventListener("mousedown", handler);
     }, []);
 
-    // ── ESC to close search ───────────────────────────────────────────────────
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); setSearchResults([]); }
@@ -517,8 +519,14 @@ export default function OwnerLayout() {
             case "pos": return <PointofSaleView />;
             case "reports": return <AnalyticsView />;
             case "sales": return <SalesHistoryView />;
-            case "staffs": return <StaffView />;
-            default: return <DashboardHome onViewAll={(tab) => { setActiveTab(tab); sessionStorage.setItem("activeTab", tab); }} />;
+            case "feedback": return <FeedbackView />;
+
+            // KEY is critical here: every time the owner navigates to the staffs tab,
+            // staffMountKey increments → React destroys and recreates StaffView →
+            // fetchStaff() runs fresh + realtime channels re-subscribe cleanly.
+            case "staffs": return <StaffView key={`staff-view-${staffMountKey}`} />;
+
+            default: return <DashboardHome onViewAll={(tab) => handleSetActiveTab(tab)} />;
         }
     };
 
@@ -527,7 +535,6 @@ export default function OwnerLayout() {
 
     return (
         <>
-            {/* ─── CHANGE 3: render modal (invisible until isSignOutOpen=true) ─── */}
             <SignOutModal
                 isOpen={isSignOutOpen}
                 storeName={storeName}
@@ -537,7 +544,6 @@ export default function OwnerLayout() {
 
             <div className="flex h-screen bg-[#f1f5f9] overflow-hidden">
 
-                {/* Sidebar */}
                 <motion.div
                     initial={false}
                     animate={{ width: isSidebarOpen ? 288 : 0, x: isSidebarOpen ? 0 : -288 }}
@@ -547,10 +553,7 @@ export default function OwnerLayout() {
                     <Sidebar
                         activeTab={activeTab}
                         mounted={tabRestored}
-                        setActiveTab={(tab: string) => {
-                            setActiveTab(tab);
-                            sessionStorage.setItem("activeTab", tab);
-                        }}
+                        setActiveTab={handleSetActiveTab}
                         closeMobile={() => setSidebarOpen(false)}
                     />
                 </motion.div>
@@ -565,7 +568,6 @@ export default function OwnerLayout() {
 
                 <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
-                    {/* Header */}
                     <header className="h-[68px] bg-white/80 backdrop-blur-md border-b border-slate-200/70 px-4 md:px-6 flex items-center justify-between sticky top-0 z-40">
                         <div className="flex items-center gap-3">
                             <motion.button whileTap={{ scale: 0.92 }}
@@ -584,14 +586,25 @@ export default function OwnerLayout() {
                                 <span className="text-slate-400 text-sm font-medium">{storeName}</span>
                                 <ChevronDown size={14} className="text-slate-300" />
                                 <span className="text-slate-800 text-sm font-black capitalize">
-                                    {activeTab === "pos" ? "Point of Sale" : activeTab === "sales" ? "Sales History" : activeTab.replace("-", " ")}
+                                    {activeTab === "pos" ? "Point of Sale"
+                                        : activeTab === "sales" ? "Sales History"
+                                            : activeTab === "feedback" ? "Feedback"
+                                                : activeTab === "staffs" ? "Staff Management"
+                                                    : activeTab.replace("-", " ")}
                                 </span>
+                                {/* Live indicator — only shown on staffs tab */}
+                                {activeTab === "staffs" && (
+                                    <span className="flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100 ml-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"
+                                            style={{ animation: "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite" }} />
+                                        Live
+                                    </span>
+                                )}
                             </div>
                         </div>
 
                         <div className="flex items-center gap-2 md:gap-3">
 
-                            {/* Search */}
                             <div className="relative hidden sm:block" ref={searchRef}>
                                 <motion.div animate={{ width: searchOpen || searchQuery ? 300 : 210 }}
                                     transition={{ type: "spring", stiffness: 300, damping: 30 }} className="relative">
@@ -611,13 +624,12 @@ export default function OwnerLayout() {
                                 <AnimatePresence>
                                     {searchOpen && searchQuery.trim() && (
                                         <SearchDropdown results={searchResults} query={searchQuery} loading={searchLoading}
-                                            onNavigate={tab => { setActiveTab(tab); sessionStorage.setItem("activeTab", tab); }}
+                                            onNavigate={tab => handleSetActiveTab(tab)}
                                             onClose={() => { setSearchOpen(false); setSearchQuery(""); setSearchResults([]); }} />
                                     )}
                                 </AnimatePresence>
                             </div>
 
-                            {/* Bell */}
                             <div className="relative" ref={notifRef}>
                                 <motion.button whileTap={{ scale: 0.92 }} onClick={handleBellClick}
                                     className="relative w-9 h-9 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors">
@@ -645,14 +657,13 @@ export default function OwnerLayout() {
                                             notifs={notifs}
                                             loading={notifLoading}
                                             seenIds={seenNotifIds}
-                                            onViewAll={() => { setActiveTab("sales"); sessionStorage.setItem("activeTab", "sales"); }}
+                                            onViewAll={() => handleSetActiveTab("sales")}
                                             onClose={() => setNotifOpen(false)}
                                         />
                                     )}
                                 </AnimatePresence>
                             </div>
 
-                            {/* Profile */}
                             <div className="relative" ref={profileRef}>
                                 <motion.button whileTap={{ scale: 0.96 }}
                                     onClick={() => { setProfileOpen(!isProfileOpen); setNotifOpen(false); }}
@@ -688,9 +699,14 @@ export default function OwnerLayout() {
                                                     <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center"><Settings size={13} /></div>
                                                     Settings
                                                 </button>
+                                                <button
+                                                    onClick={() => { setProfileOpen(false); handleSetActiveTab("feedback"); }}
+                                                    className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl transition-colors">
+                                                    <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center"><MessageSquarePlus size={13} className="text-blue-500" /></div>
+                                                    Feedback
+                                                </button>
                                             </div>
                                             <div className="border-t border-slate-100 pt-1 mt-1">
-                                                {/* ─── CHANGE 3: was direct signOut, now opens modal ─── */}
                                                 <button
                                                     onClick={() => { setProfileOpen(false); setSignOutOpen(true); }}
                                                     className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50 rounded-xl transition-colors">
@@ -705,7 +721,6 @@ export default function OwnerLayout() {
                         </div>
                     </header>
 
-                    {/* Page Content */}
                     <main className="flex-1 overflow-y-auto">
                         <div className="max-w-7xl mx-auto p-4 md:p-6">
                             <AnimatePresence mode="wait">
