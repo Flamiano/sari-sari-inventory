@@ -449,6 +449,29 @@ export default function StaffCashierLoginPage() {
                 @keyframes gridFloat { 0%{background-position:0 0} 100%{background-position:40px 40px} }
                 @keyframes floatUp { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
                 .otp-input:focus { border-color: #0891b2 !important; box-shadow: 0 0 0 3px rgba(8,145,178,0.12) !important; }
+
+                /* ── Responsive OTP boxes ── */
+                .otp-box {
+                  width: 46px;
+                  height: 54px;
+                  font-size: 1.2rem;
+                }
+                @media (max-width: 480px) {
+                  .otp-box {
+                    width: 36px;
+                    height: 44px;
+                    font-size: 1rem;
+                  }
+                  .otp-wrap { gap: 4px !important; }
+                }
+                @media (max-width: 360px) {
+                  .otp-box {
+                    width: 30px;
+                    height: 38px;
+                    font-size: 0.85rem;
+                  }
+                  .otp-wrap { gap: 3px !important; }
+                }
             `}</style>
 
             <div className="min-h-screen flex" style={{ background: "#F7F9FC" }}>
@@ -788,7 +811,8 @@ export default function StaffCashierLoginPage() {
                                     <motion.div
                                         animate={shake ? { x: [-7, 7, -6, 6, -4, 4, 0] } : { x: 0 }}
                                         transition={{ duration: 0.55 }}
-                                        className="flex gap-1.5 justify-center mb-2"
+                                        className="otp-wrap flex justify-center mb-2"
+                                        style={{ gap: "6px" }}
                                         onPaste={handleOtpPaste}>
                                         {otp.map((digit, i) => (
                                             <input
@@ -802,9 +826,8 @@ export default function StaffCashierLoginPage() {
                                                 onChange={e => handleOtpChange(i, e.target.value)}
                                                 onKeyDown={e => handleOtpKeyDown(i, e)}
                                                 placeholder="·"
-                                                className="otp-input text-center font-black text-slate-900 bg-white rounded-xl outline-none transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                                className="otp-input otp-box text-center font-black text-slate-900 bg-white rounded-xl outline-none transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                                                 style={{
-                                                    width: "46px", height: "54px", fontSize: "1.2rem",
                                                     border: otpErrors.otp ? "1.5px solid #ef4444" : digit ? "1.5px solid #67e8f9" : "1.5px solid #e2e8f0",
                                                     background: loading ? "#f8fafc" : digit ? "#ecfeff" : "white",
                                                     boxShadow: otpErrors.otp ? "0 0 0 3px rgba(239,68,68,0.08)" : "none",

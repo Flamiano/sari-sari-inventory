@@ -335,6 +335,29 @@ export default function LoginPage() {
         @keyframes gridFloat { 0% { background-position: 0 0; } 100% { background-position: 40px 40px; } }
         @keyframes shimmerBar { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
         .otp-input:focus { border-color: #2563eb !important; box-shadow: 0 0 0 3px rgba(37,99,235,0.12) !important; }
+
+        /* ── Responsive OTP boxes ── */
+        .otp-box {
+          width: 46px;
+          height: 54px;
+          font-size: 1.2rem;
+        }
+        @media (max-width: 480px) {
+          .otp-box {
+            width: 36px;
+            height: 44px;
+            font-size: 1rem;
+          }
+          .otp-wrap { gap: 4px !important; }
+        }
+        @media (max-width: 360px) {
+          .otp-box {
+            width: 30px;
+            height: 38px;
+            font-size: 0.85rem;
+          }
+          .otp-wrap { gap: 3px !important; }
+        }
       `}</style>
 
             <div className="min-h-screen flex">
@@ -509,7 +532,8 @@ export default function LoginPage() {
                                     <motion.div
                                         animate={shake ? { x: [-7, 7, -6, 6, -4, 4, 0] } : { x: 0 }}
                                         transition={{ duration: 0.55 }}
-                                        className="flex gap-1.5 justify-center mb-2"
+                                        className="otp-wrap flex justify-center mb-2"
+                                        style={{ gap: "6px" }}
                                         onPaste={handleOtpPaste}>
                                         {otp.map((digit, i) => (
                                             <input
@@ -523,9 +547,8 @@ export default function LoginPage() {
                                                 onChange={e => handleOtpChange(i, e.target.value)}
                                                 onKeyDown={e => handleOtpKeyDown(i, e)}
                                                 placeholder="·"
-                                                className="otp-input text-center font-black text-slate-900 bg-white rounded-xl outline-none transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                                className="otp-input otp-box text-center font-black text-slate-900 bg-white rounded-xl outline-none transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                                                 style={{
-                                                    width: "46px", height: "54px", fontSize: "1.2rem",
                                                     border: errors.otp ? "1.5px solid #ef4444" : digit ? "1.5px solid #93c5fd" : "1.5px solid #e2e8f0",
                                                     background: loading ? "#f8fafc" : digit ? "#f0f7ff" : "white",
                                                     boxShadow: errors.otp ? "0 0 0 3px rgba(239,68,68,0.08)" : "none",
@@ -618,14 +641,14 @@ export default function LoginPage() {
                                         Two-Factor Auth
                                     </h1>
                                     <p className="text-slate-400 text-[0.88rem] leading-relaxed">
-                                        Open your authenticator app and enter<br />the 6-digit code for this account.
+                                        Open your authenticator app and enter<br />the 8-digit code for this account.
                                     </p>
                                 </div>
 
                                 <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-6">
                                     <Shield size={16} className="text-blue-500 shrink-0 mt-0.5" />
                                     <p className="text-[0.78rem] text-blue-700 font-medium leading-snug">
-                                        Your account has two-factor authentication enabled. Enter the rotating 6-digit code from your authenticator app to complete sign-in.
+                                        Your account has two-factor authentication enabled. Enter the rotating 8-digit code from your authenticator app to complete sign-in.
                                     </p>
                                 </div>
 
