@@ -590,7 +590,7 @@ export default function AuthFeature() {
                         </thead>
                         <tbody>
                             {[
-                                { feature: "2FA on Login", owner: true, cashier: true, staff: false },
+                                { feature: "2FA on Login", owner: true, cashier: false, staff: false },
                                 { feature: "MFA (extra layer)", owner: true, cashier: false, staff: false },
                                 { feature: "Email Verification", owner: true, cashier: false, staff: false },
                                 { feature: "Password Reset", owner: true, cashier: false, staff: false },

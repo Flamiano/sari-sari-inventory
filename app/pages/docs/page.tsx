@@ -643,7 +643,7 @@ const DOCS: DocSection[] = [
             },
             {
                 id: "cashier-2fa",
-                title: "Cashier Login — PIN + 2FA",
+                title: "Cashier Login — PIN Only",
                 content: (
                     <div className="space-y-4">
                         <p className="text-[0.85rem] leading-relaxed" style={{ color: "#374151" }}>
@@ -653,7 +653,7 @@ const DOCS: DocSection[] = [
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             {[
                                 { role: "Staff Worker", steps: ["Select Staff Worker role", "Enter email + PIN", "Redirected to Staff dashboard"], color: "#7C3AED", badge: "PIN Only" },
-                                { role: "Cashier", steps: ["Select Cashier role", "Enter email + PIN", "Enter 8-digit email OTP", "Redirected to POS"], color: "#0891B2", badge: "PIN + 2FA" },
+                                { role: "Cashier", steps: ["Select Cashier role", "Enter email + PIN", "Redirected to POS"], color: "#0891B2", badge: "PIN Only" },
                             ].map(r => (
                                 <div key={r.role} className="rounded-xl p-4 border" style={{ borderColor: "#E2E8F0" }}>
                                     <div className="flex items-center gap-2 mb-3">

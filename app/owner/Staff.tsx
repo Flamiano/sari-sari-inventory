@@ -8,14 +8,14 @@ import {
     Flame, Clock, CalendarDays, LogIn, LogOut,
     CheckCircle2, ChevronDown, RotateCcw, AlertCircle,
     TrendingUp, BarChart2, Wifi, WifiOff,
-    Filter, Table2, Download, Eye,
+    Table2, ChevronLeft, RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid,
     Tooltip, ResponsiveContainer, Cell,
-    AreaChart, Area, PieChart, Pie, Legend,
+    AreaChart, Area, PieChart, Pie,
     RadialBarChart, RadialBar,
 } from "recharts";
 import { getDayStatus, isPastNoon, localDateString, type DayStatus } from "@/app/utils/attendanceOff";
@@ -169,7 +169,7 @@ function PHFlag() {
     );
 }
 
-// Reusable dropdown
+// DropdownSelect
 function DropdownSelect({ label, value, options, onSelect, icon }: {
     label: string;
     value: string;
@@ -237,28 +237,37 @@ function DropdownSelect({ label, value, options, onSelect, icon }: {
     );
 }
 
-// Attendance Modal — 3 tabs: Bar chart, Overview (donut + area + radial), Table
+// Attendance Modal
 function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: () => void }) {
     const [records, setRecords] = useState<AttendanceRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [view, setView] = useState<"bar" | "overview" | "table">("bar");
 
-    useEffect(() => {
-        const load = async () => {
-            setLoading(true);
-            const { data, error } = await supabase
-                .from("staff_attendance")
-                .select("*")
-                .eq("staff_id", member.id)
-                .order("time_in", { ascending: false })
-                .limit(30);
-            if (!error) setRecords(data ?? []);
-            setLoading(false);
-        };
-        load();
+    const load = useCallback(async () => {
+        setLoading(true);
+        const { data, error } = await supabase
+            .from("staff_attendance")
+            .select("*")
+            .eq("staff_id", member.id)
+            .order("time_in", { ascending: false })
+            .limit(30);
+        if (!error) setRecords(data ?? []);
+        setLoading(false);
     }, [member.id]);
 
-    // Core stats
+    useEffect(() => { load(); }, [load]);
+
+    useEffect(() => {
+        const ch = supabase
+            .channel(`att-modal:${member.id}`)
+            .on("postgres_changes", {
+                event: "*", schema: "public", table: "staff_attendance",
+                filter: `staff_id=eq.${member.id}`,
+            }, () => load())
+            .subscribe();
+        return () => { supabase.removeChannel(ch); };
+    }, [member.id, load]);
+
     const totalSessions = records.length;
     const presentDays = records.filter(r => r.attendance_status === "present").length;
     const lateDays = records.filter(r => r.attendance_status === "late").length;
@@ -269,7 +278,6 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
     const attendanceRate = totalSessions > 0 ? Math.round(((presentDays + lateDays) / totalSessions) * 100) : 0;
     const punctualRate = totalSessions > 0 ? Math.round((presentDays / totalSessions) * 100) : 0;
 
-    // Bar chart — last 14 days
     const barData = (() => {
         const days: { date: string; label: string; hours: number; status: AttendanceStatus | null }[] = [];
         for (let i = 13; i >= 0; i--) {
@@ -287,7 +295,6 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
         return days;
     })();
 
-    // Area chart — daily + cumulative hours trend
     const areaData = (() => {
         let cumulative = 0;
         return barData.map(d => {
@@ -296,20 +303,17 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
         });
     })();
 
-    // Donut breakdown
     const donutData = [
         { name: "Present", value: presentDays, fill: "#10b981" },
         { name: "Late", value: lateDays, fill: "#f59e0b" },
         { name: "Absent", value: absentDays, fill: "#ef4444" },
     ].filter(d => d.value > 0);
 
-    // Radial bar — attendance + punctuality rates
     const radialData = [
         { name: "Attendance", value: attendanceRate, fill: "#14b8a6" },
         { name: "On Time", value: punctualRate, fill: "#6366f1" },
     ];
 
-    // Shared dark tooltip
     const DarkTooltip = ({ active, payload, label }: any) => {
         if (!active || !payload?.length) return null;
         const item = payload[0].payload;
@@ -354,13 +358,9 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                 initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 40 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
                 className="bg-white w-full sm:max-w-2xl sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col">
-
-                {/* Mobile drag handle */}
                 <div className="flex justify-center pt-3 sm:hidden shrink-0">
                     <div className="w-9 h-1 rounded-full bg-slate-200" />
                 </div>
-
-                {/* Header */}
                 <div className="shrink-0" style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e3a5f 55%, #134e4a 100%)" }}>
                     <div className="p-5 pb-3">
                         <div className="flex items-center justify-between mb-4">
@@ -381,8 +381,6 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                 <X size={16} />
                             </button>
                         </div>
-
-                        {/* Stats strip */}
                         <div className="grid grid-cols-5 gap-1.5">
                             {[
                                 { label: "Sessions", value: String(totalSessions), color: "text-white" },
@@ -398,22 +396,16 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                             ))}
                         </div>
                     </div>
-
-                    {/* Tabs */}
                     <div className="flex px-5 pb-0 gap-0.5">
                         {tabs.map(t => (
                             <button key={t.id} onClick={() => setView(t.id)}
-                                className={`flex items-center gap-1.5 px-3.5 py-2 text-[11px] font-black rounded-t-xl transition-all ${view === t.id
-                                    ? "bg-white text-slate-800"
-                                    : "text-slate-500 hover:text-slate-200 hover:bg-white/5"}`}>
-                                {t.icon}
-                                {t.label}
+                                className={`flex items-center gap-1.5 px-3.5 py-2 text-[11px] font-black rounded-t-xl transition-all ${view === t.id ? "bg-white text-slate-800" : "text-slate-500 hover:text-slate-200 hover:bg-white/5"}`}>
+                                {t.icon}{t.label}
                             </button>
                         ))}
                     </div>
                 </div>
 
-                {/* Body */}
                 <div className="flex-1 overflow-y-auto bg-slate-50/50">
                     {loading ? (
                         <div className="flex items-center justify-center py-16 gap-2 text-slate-400">
@@ -424,13 +416,10 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                         <div className="flex flex-col items-center py-16 text-slate-300">
                             <CalendarDays size={40} className="mb-3 opacity-40" />
                             <p className="text-sm font-bold text-slate-400">No attendance records yet</p>
-                            <p className="text-xs mt-1 text-slate-300">Records are logged automatically on login.</p>
                         </div>
                     ) : view === "bar" ? (
-
-                        // BAR CHART tab
                         <div className="p-5 space-y-4">
-                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-4">
+                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                                 <div className="flex items-center justify-between mb-1">
                                     <p className="text-xs font-black text-slate-700">Hours Worked — Last 14 Days</p>
                                     <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-lg border border-slate-100">
@@ -460,15 +449,9 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                             <span className="text-[10px] font-bold text-slate-500 capitalize">{s}</span>
                                         </div>
                                     ))}
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="w-2.5 h-2.5 rounded bg-slate-200" />
-                                        <span className="text-[10px] font-bold text-slate-400">No record</span>
-                                    </div>
                                 </div>
                             </div>
-
-                            {/* Recent sessions list */}
-                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-4">
+                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                                 <p className="text-xs font-black text-slate-700 mb-3">Recent Sessions</p>
                                 <div className="space-y-2">
                                     {records.slice(0, 7).map(r => {
@@ -495,33 +478,17 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                 </div>
                             </div>
                         </div>
-
                     ) : view === "overview" ? (
-
-                        // OVERVIEW tab — donut + radial + area
                         <div className="p-5 space-y-4">
-
-                            {/* Top row: Donut + Radial */}
                             <div className="grid grid-cols-2 gap-4">
-
-                                {/* Donut — session breakdown */}
-                                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-4">
+                                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                                     <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-0.5">Breakdown</p>
                                     <p className="text-[9px] text-slate-400 mb-1">{totalSessions} total sessions</p>
                                     <div style={{ height: 148 }}>
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
-                                                <Pie
-                                                    data={donutData}
-                                                    cx="50%" cy="50%"
-                                                    innerRadius={42} outerRadius={62}
-                                                    paddingAngle={3}
-                                                    dataKey="value"
-                                                    strokeWidth={0}
-                                                >
-                                                    {donutData.map((entry, i) => (
-                                                        <Cell key={i} fill={entry.fill} />
-                                                    ))}
+                                                <Pie data={donutData} cx="50%" cy="50%" innerRadius={42} outerRadius={62} paddingAngle={3} dataKey="value" strokeWidth={0}>
+                                                    {donutData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                                                 </Pie>
                                                 <Tooltip content={<DonutTooltip />} />
                                             </PieChart>
@@ -539,32 +506,22 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                         ))}
                                     </div>
                                 </div>
-
-                                {/* Radial — attendance + punctuality rates */}
-                                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-4">
+                                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                                     <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-0.5">Rates</p>
                                     <p className="text-[9px] text-slate-400 mb-1">Based on {totalSessions} sessions</p>
                                     <div style={{ height: 148 }}>
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <RadialBarChart
-                                                cx="50%" cy="50%"
-                                                innerRadius={28} outerRadius={64}
-                                                data={radialData}
-                                                startAngle={90} endAngle={-270}
-                                                barSize={13}
-                                            >
+                                            <RadialBarChart cx="50%" cy="50%" innerRadius={28} outerRadius={64} startAngle={90} endAngle={-270} data={radialData} barSize={13}>
                                                 <RadialBar dataKey="value" cornerRadius={6} background={{ fill: "#f1f5f9" }} />
-                                                <Tooltip
-                                                    content={({ active, payload }) => {
-                                                        if (!active || !payload?.length) return null;
-                                                        return (
-                                                            <div className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs shadow-xl" style={{ border: "1px solid rgba(255,255,255,0.1)" }}>
-                                                                <p style={{ color: payload[0].payload.fill }} className="font-black">{payload[0].payload.name}</p>
-                                                                <p className="text-slate-300">{payload[0].value}%</p>
-                                                            </div>
-                                                        );
-                                                    }}
-                                                />
+                                                <Tooltip content={({ active, payload }) => {
+                                                    if (!active || !payload?.length) return null;
+                                                    return (
+                                                        <div className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs shadow-xl" style={{ border: "1px solid rgba(255,255,255,0.1)" }}>
+                                                            <p style={{ color: payload[0].payload.fill }} className="font-black">{payload[0].payload.name}</p>
+                                                            <p className="text-slate-300">{payload[0].value}%</p>
+                                                        </div>
+                                                    );
+                                                }} />
                                             </RadialBarChart>
                                         </ResponsiveContainer>
                                     </div>
@@ -581,9 +538,7 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                     </div>
                                 </div>
                             </div>
-
-                            {/* Area chart — daily + cumulative hours */}
-                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-4">
+                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                                 <div className="flex items-center justify-between mb-0.5">
                                     <p className="text-xs font-black text-slate-700">Hours Trend — Last 14 Days</p>
                                     <span className="text-[10px] font-black text-teal-600">{totalHours}h total</span>
@@ -611,19 +566,7 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                         </AreaChart>
                                     </ResponsiveContainer>
                                 </div>
-                                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-50">
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="w-5 h-0.5 rounded-full bg-teal-400" />
-                                        <span className="text-[10px] font-bold text-slate-500">Cumulative</span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="w-5 h-0.5 rounded-full bg-indigo-400" />
-                                        <span className="text-[10px] font-bold text-slate-500">Daily hours</span>
-                                    </div>
-                                </div>
                             </div>
-
-                            {/* Insight strip */}
                             <div className="grid grid-cols-3 gap-3">
                                 {[
                                     { label: "Avg Session", value: formatDuration(avgMinutes), sub: "per login", color: "text-teal-700", bg: "bg-teal-50", border: "border-teal-100" },
@@ -638,10 +581,7 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                 ))}
                             </div>
                         </div>
-
                     ) : (
-
-                        // TABLE tab
                         <div className="p-5">
                             <div className="flex items-center justify-between mb-3">
                                 <p className="text-xs font-black text-slate-700">All Records</p>
@@ -654,9 +594,7 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                     <thead>
                                         <tr style={{ background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
                                             {["Date", "Status", "Time In", "Time Out", "Duration"].map(h => (
-                                                <th key={h} className="px-3 py-3 text-left font-black text-slate-500 text-[10px] uppercase tracking-wider whitespace-nowrap">
-                                                    {h}
-                                                </th>
+                                                <th key={h} className="px-3 py-3 text-left font-black text-slate-500 text-[10px] uppercase tracking-wider whitespace-nowrap">{h}</th>
                                             ))}
                                         </tr>
                                     </thead>
@@ -675,9 +613,7 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                                                         </span>
                                                     </td>
                                                     <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap font-medium">
-                                                        <span className="flex items-center gap-1">
-                                                            <LogIn size={9} className="text-slate-300" /> {formatTime(r.time_in)}
-                                                        </span>
+                                                        <span className="flex items-center gap-1"><LogIn size={9} className="text-slate-300" /> {formatTime(r.time_in)}</span>
                                                     </td>
                                                     <td className="px-3 py-2.5 whitespace-nowrap">
                                                         {r.time_out ? (
@@ -705,10 +641,8 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
                     )}
                 </div>
 
-                {/* Footer */}
                 <div className="px-5 shrink-0 bg-white" style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))", paddingTop: "0.75rem", borderTop: "1px solid #f1f5f9" }}>
-                    <button onClick={onClose}
-                        className="w-full py-3 rounded-xl border border-slate-200 text-sm font-black text-slate-500 hover:bg-slate-50 active:scale-[0.98] transition-all">
+                    <button onClick={onClose} className="w-full py-3 rounded-xl border border-slate-200 text-sm font-black text-slate-500 hover:bg-slate-50 active:scale-[0.98] transition-all">
                         Close
                     </button>
                 </div>
@@ -716,7 +650,6 @@ function AttendanceModal({ member, onClose }: { member: StaffMember; onClose: ()
         </div>
     );
 }
-
 
 // Staff Card
 function StaffCard({ member, index, onEdit, onDelete, onToggleStatus, onViewAttendance, lastAttendance, isOnline }: {
@@ -739,8 +672,7 @@ function StaffCard({ member, index, onEdit, onDelete, onToggleStatus, onViewAtte
         <motion.div
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.06, duration: 0.25 }}
-            className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 overflow-hidden group w-full"
-        >
+            className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 overflow-hidden group w-full">
             <div className={`h-1 w-full bg-gradient-to-r ${member.role === "cashier" ? "from-teal-500 to-cyan-500" : "from-orange-400 to-amber-500"}`} />
             <div className="p-3 sm:p-4">
                 <div className="flex items-start justify-between mb-3">
@@ -751,7 +683,6 @@ function StaffCard({ member, index, onEdit, onDelete, onToggleStatus, onViewAtte
                                 style={isOnline ? { boxShadow: "0 0 0 2.5px #22c55e, 0 0 0 4.5px rgba(34,197,94,0.2)" } : {}}>
                                 <span className="text-sm font-black text-white">{initials(member.full_name)}</span>
                             </div>
-                            {/* Online/Offline indicator dot — bottom-right corner */}
                             <span
                                 className="absolute -bottom-1 -right-1 w-3.5 h-3.5 border-2 border-white rounded-full transition-colors"
                                 style={{ background: isOnline ? "#22c55e" : "#94a3b8" }}
@@ -762,7 +693,6 @@ function StaffCard({ member, index, onEdit, onDelete, onToggleStatus, onViewAtte
                             <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} />
                                 <span className="text-[9px] sm:text-[10px] font-bold text-slate-400">{status.label}</span>
-                                {/* Online/Offline badge */}
                                 <span
                                     className="text-[8px] sm:text-[9px] font-black px-1 sm:px-1.5 py-0.5 rounded-full border flex items-center gap-0.5"
                                     style={isOnline
@@ -770,8 +700,7 @@ function StaffCard({ member, index, onEdit, onDelete, onToggleStatus, onViewAtte
                                         : { color: "#94a3b8", background: "rgba(148,163,184,0.08)", borderColor: "rgba(148,163,184,0.2)" }}>
                                     {isOnline
                                         ? <><span className="w-1 h-1 rounded-full bg-green-500 inline-block" style={{ animation: "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite" }} /> Online</>
-                                        : <><WifiOff size={7} /> Offline</>
-                                    }
+                                        : <><WifiOff size={7} /> Offline</>}
                                 </span>
                                 {isClockedIn && (
                                     <span className="text-[8px] sm:text-[9px] font-black text-emerald-600 bg-emerald-50 px-1 sm:px-1.5 py-0.5 rounded-full border border-emerald-200 whitespace-nowrap">
@@ -793,8 +722,7 @@ function StaffCard({ member, index, onEdit, onDelete, onToggleStatus, onViewAtte
                                     <motion.div
                                         initial={{ opacity: 0, scale: 0.92, y: -4 }} animate={{ opacity: 1, scale: 1, y: 0 }}
                                         exit={{ opacity: 0, scale: 0.92, y: -4 }} transition={{ duration: 0.12 }}
-                                        className="absolute right-0 top-8 z-20 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden w-48"
-                                    >
+                                        className="absolute right-0 top-8 z-20 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden w-48">
                                         <button onClick={() => { onEdit(member); setMenuOpen(false); }}
                                             className="flex items-center gap-2.5 w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">
                                             <Pencil size={12} className="text-slate-400" /> Edit Details
@@ -846,7 +774,6 @@ function StaffCard({ member, index, onEdit, onDelete, onToggleStatus, onViewAtte
                     )}
                 </div>
 
-                {/* Last attendance snippet */}
                 {lastAttendance && (
                     <div className={`mt-2 sm:mt-3 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[9px] sm:text-[10px] ${ATTENDANCE_META[lastAttendance.attendance_status].bg} flex items-center gap-1.5`}>
                         <Clock size={9} className={ATTENDANCE_META[lastAttendance.attendance_status].color} />
@@ -877,7 +804,7 @@ function StaffCard({ member, index, onEdit, onDelete, onToggleStatus, onViewAtte
     );
 }
 
-// Staff Form Modal (Add / Edit)
+// Staff Form Modal
 function StaffModal({ mode, initial, onClose, onSaved }: {
     mode: "add" | "edit";
     initial?: StaffMember;
@@ -932,7 +859,7 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
             if (mode === "add") {
                 const { error } = await supabase.from("staff_members").insert({ ...payload, owner_id: user.id });
                 if (error) throw error;
-                toast.success(`${form.full_name} added to your team! 🎉`);
+                toast.success(`${form.full_name} added! 🎉`);
             } else {
                 const { error } = await supabase.from("staff_members").update(payload).eq("id", initial!.id);
                 if (error) throw error;
@@ -956,12 +883,10 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
             <motion.div
                 initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 40 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                className="bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col"
-            >
+                className="bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col">
                 <div className="flex justify-center pt-3 sm:hidden shrink-0">
                     <div className="w-9 h-1 rounded-full bg-slate-200" />
                 </div>
-
                 <div className={`p-5 text-white shrink-0 ${isEdit ? "bg-gradient-to-br from-teal-600 to-cyan-700" : "bg-gradient-to-br from-orange-500 to-amber-600"}`}>
                     <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3">
@@ -973,7 +898,7 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
                                     {isEdit ? "Edit Staff" : "Add New Staff"}
                                 </h2>
                                 <p className="text-white/70 text-[11px] mt-0.5">
-                                    {isEdit ? `Editing ${initial?.full_name}` : "Add a team member to your store"}
+                                    {isEdit ? `Editing ${initial?.full_name}` : "Fill in the details for the new staff member"}
                                 </p>
                             </div>
                         </div>
@@ -983,18 +908,13 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
 
                 <div className="p-5 space-y-4 overflow-y-auto flex-1">
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">
-                            Full Name <span className="text-red-400">*</span>
-                        </label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">Full Name <span className="text-red-400">*</span></label>
                         <input type="text" value={form.full_name} onChange={e => set("full_name", e.target.value)}
                             placeholder="e.g. Miguel Santos"
                             className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 placeholder:text-slate-300 outline-none focus:ring-2 ring-teal-400 focus:border-teal-300 transition-all" />
                     </div>
-
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">
-                            Email Address <span className="text-red-400">*</span>
-                        </label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">Email Address <span className="text-red-400">*</span></label>
                         <div className="relative">
                             <Mail size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" />
                             <input type="email" value={form.email} onChange={e => set("email", e.target.value)}
@@ -1002,11 +922,8 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
                                 className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 placeholder:text-slate-300 outline-none focus:ring-2 ring-teal-400 focus:border-teal-300 transition-all" />
                         </div>
                     </div>
-
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">
-                            Phone Number <span className="text-slate-300 font-normal normal-case">(optional · 11 digits)</span>
-                        </label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">Phone Number <span className="text-slate-300 font-normal normal-case">(optional · 11 digits)</span></label>
                         <div className="relative flex items-center">
                             <div className="absolute left-3 flex items-center gap-1.5 pointer-events-none">
                                 <PHFlag />
@@ -1021,13 +938,9 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
                             </span>
                         </div>
                     </div>
-
                     <div>
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">
-                            POS PIN{" "}
-                            <span className="text-slate-300 font-normal normal-case">
-                                {isEdit ? "(leave blank to keep current PIN)" : "(4 digits, optional)"}
-                            </span>
+                            POS PIN{" "}<span className="text-slate-300 font-normal normal-case">{isEdit ? "(leave blank to keep current PIN)" : "(4 digits, optional)"}</span>
                         </label>
                         <div className="relative">
                             <KeyRound size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" />
@@ -1042,16 +955,9 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
                                 </span>
                             )}
                         </div>
-                        <p className="text-[9px] text-slate-400 mt-1 flex items-center gap-1">
-                            <KeyRound size={8} className="text-slate-300" />
-                            PIN is stored securely and never shown after saving.
-                        </p>
                     </div>
-
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">
-                            Role <span className="text-red-400">*</span>
-                        </label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">Role <span className="text-red-400">*</span></label>
                         <div className="grid grid-cols-2 gap-2">
                             {(["staff", "cashier"] as StaffRole[]).map(r => {
                                 const meta = ROLE_META[r];
@@ -1067,7 +973,6 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
                             })}
                         </div>
                     </div>
-
                     <div>
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">Status</label>
                         <div className="grid grid-cols-3 gap-2">
@@ -1088,11 +993,8 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
                             })}
                         </div>
                     </div>
-
                     <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">
-                            Notes <span className="text-slate-300 font-normal normal-case">(optional)</span>
-                        </label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">Notes <span className="text-slate-300 font-normal normal-case">(optional)</span></label>
                         <textarea value={form.notes} onChange={e => set("notes", e.target.value)}
                             placeholder="Schedule, responsibilities, etc." rows={2}
                             className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 placeholder:text-slate-300 outline-none focus:ring-2 ring-teal-400 focus:border-teal-300 transition-all resize-none" />
@@ -1117,9 +1019,7 @@ function StaffModal({ mode, initial, onClose, onSaved }: {
 }
 
 // Delete Modal
-function DeleteModal({ member, onClose, onConfirm }: {
-    member: StaffMember; onClose: () => void; onConfirm: () => void;
-}) {
+function DeleteModal({ member, onClose, onConfirm }: { member: StaffMember; onClose: () => void; onConfirm: () => void; }) {
     const [deleting, setDeleting] = useState(false);
     const handleDelete = async () => {
         setDeleting(true);
@@ -1149,9 +1049,7 @@ function DeleteModal({ member, onClose, onConfirm }: {
                     </div>
                     <h3 className="text-base font-black text-slate-900 mb-1">Remove Staff Member?</h3>
                     <p className="text-sm text-slate-500">
-                        Are you sure you want to remove{" "}
-                        <span className="font-black text-slate-800">{member.full_name}</span>?
-                        This action cannot be undone.
+                        Are you sure you want to remove <span className="font-black text-slate-800">{member.full_name}</span>? This action cannot be undone.
                     </p>
                     <div className="flex gap-3 mt-6" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
                         <button onClick={onClose}
@@ -1195,8 +1093,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
     );
 }
 
-
-// Today's Attendance panel — shows OFF for Sunday/holidays, Mark Absent at noon
+// Today's Attendance Panel
 function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCount, onMemberClick, onMarkAbsent }: {
     staffList: StaffMember[];
     attendanceMap: Record<string, AttendanceRecord | null>;
@@ -1216,21 +1113,15 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
-            const today = localDateString();
-            // Mark absent for every active staff with no record today
             for (const m of staffList) {
                 if (m.status !== "active") continue;
                 const existing = attendanceMap[m.id];
                 const hasToday = existing && existing.date === today;
                 if (!hasToday) {
                     await supabase.from("staff_attendance").insert({
-                        staff_id: m.id,
-                        staff_name: m.full_name,
-                        staff_role: m.role,
-                        owner_id: m.owner_id,
-                        time_in: `${today}T12:00:00+08:00`,
-                        date: today,
-                        attendance_status: "absent",
+                        staff_id: m.id, staff_name: m.full_name, staff_role: m.role,
+                        owner_id: m.owner_id, time_in: `${today}T12:00:00+08:00`,
+                        date: today, attendance_status: "absent",
                     });
                 }
             }
@@ -1238,20 +1129,13 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
             onMarkAbsent();
         } catch {
             toast.error("Failed to mark absences.");
-        } finally {
-            setMarkingAbsent(false);
-        }
+        } finally { setMarkingAbsent(false); }
     };
 
-    // OFF screen for Sunday / holidays
     if (isOff) {
         const offColor = todayStatus.type === "sunday" ? "#7c3aed" : "#0891b2";
         const offEmoji = todayStatus.type === "sunday" ? "🌙" : "🎉";
         const offLabel = todayStatus.type === "sunday" ? "REST DAY" : (todayStatus as any).label;
-        const offSub = todayStatus.type === "sunday"
-            ? "Today is Sunday — no attendance is recorded."
-            : `${(todayStatus as any).label} — Philippine public holiday. No attendance recorded.`;
-
         return (
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5">
                 <div className="flex items-center justify-between mb-4">
@@ -1272,26 +1156,14 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
                 <div className="rounded-2xl p-5 text-center" style={{ background: `${offColor}06`, border: `1.5px solid ${offColor}18` }}>
                     <div className="text-3xl mb-2">{offEmoji}</div>
                     <p className="font-black text-slate-800 text-sm mb-1">{offLabel}</p>
-                    <p className="text-[0.72rem] text-slate-400 leading-relaxed">{offSub}</p>
-                    <div className="mt-4 flex flex-wrap justify-center gap-2">
-                        {staffList.map(m => (
-                            <div key={m.id} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold"
-                                style={{ background: "rgba(148,163,184,0.1)", color: "#94a3b8", border: "1px solid rgba(148,163,184,0.2)" }}>
-                                <span className="w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-black text-white bg-gradient-to-br"
-                                    style={{ background: "linear-gradient(135deg,#94a3b8,#64748b)" }}>
-                                    {initials(m.full_name)}
-                                </span>
-                                {m.full_name.split(" ")[0]}
-                                <span className="text-[8px] font-black uppercase tracking-wider opacity-60">OFF</span>
-                            </div>
-                        ))}
-                    </div>
+                    <p className="text-[0.72rem] text-slate-400 leading-relaxed">
+                        {todayStatus.type === "sunday" ? "Today is Sunday — no attendance is recorded." : `${offLabel} — Philippine public holiday. No attendance recorded.`}
+                    </p>
                 </div>
             </div>
         );
     }
 
-    // Normal workday attendance panel
     return (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5">
             <div className="flex items-center justify-between mb-4">
@@ -1305,7 +1177,6 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    {/* Mark Absent button — only shows at or after noon for active staff with no record */}
                     {pastNoon && staffList.some(m => m.status === "active" && (!attendanceMap[m.id] || attendanceMap[m.id]?.date !== today)) && (
                         <button onClick={handleMarkAbsent} disabled={markingAbsent}
                             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black transition-all disabled:opacity-60"
@@ -1315,13 +1186,10 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
                         </button>
                     )}
                     <div className="flex items-center gap-1.5 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
-                        <TrendingUp size={10} />
-                        {clockedInCount} clocked in
+                        <TrendingUp size={10} />{clockedInCount} clocked in
                     </div>
                 </div>
             </div>
-
-            {/* Noon cutoff banner */}
             {pastNoon && (
                 <div className="mb-3 px-3 py-2 rounded-xl flex items-center gap-2 text-[10px]"
                     style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)" }}>
@@ -1330,17 +1198,14 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
                     <span className="text-slate-500">Staff without a login today are marked <span className="font-black text-red-500">Absent</span>.</span>
                 </div>
             )}
-
             <div className="space-y-1.5">
                 {staffList.map(member => {
                     const att = attendanceMap[member.id];
                     const isClockedIn = att && !att.time_out;
                     const isToday = att && att.date === today;
                     const isAbsent = pastNoon && member.status === "active" && (!att || att.date !== today);
-
                     return (
-                        <button key={member.id}
-                            onClick={() => onMemberClick(member)}
+                        <button key={member.id} onClick={() => onMemberClick(member)}
                             className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors text-left group">
                             <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${avatarGradient(member.full_name)} flex items-center justify-center shrink-0`}>
                                 <span className="text-[11px] font-black text-white">{initials(member.full_name)}</span>
@@ -1355,9 +1220,7 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
                             </div>
                             <div className="shrink-0 text-right">
                                 {isAbsent ? (
-                                    <span className="text-[10px] font-black text-red-500 flex items-center gap-1">
-                                        <AlertCircle size={9} /> Absent
-                                    </span>
+                                    <span className="text-[10px] font-black text-red-500 flex items-center gap-1"><AlertCircle size={9} /> Absent</span>
                                 ) : isToday && isClockedIn ? (
                                     <div className="flex items-center gap-1 text-[10px] font-black text-emerald-600">
                                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -1368,9 +1231,7 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
                                         {formatTime(att.time_in)} – {formatTime(att.time_out!)}
                                     </div>
                                 ) : (
-                                    <span className="text-[10px] font-bold text-slate-300 flex items-center gap-1">
-                                        <AlertCircle size={9} /> No record
-                                    </span>
+                                    <span className="text-[10px] font-bold text-slate-300 flex items-center gap-1"><AlertCircle size={9} /> No record</span>
                                 )}
                             </div>
                             <ChevronRight size={11} className="text-slate-200 group-hover:text-teal-400 transition-colors shrink-0" />
@@ -1382,10 +1243,7 @@ function TodayAttendancePanel({ staffList, attendanceMap, onlineIds, clockedInCo
     );
 }
 
-
-// ─── Attendance Log View ───────────────────────────────────────────────────────
-// Full date-range attendance table for all staff, including OFF days
-
+// Attendance Log types
 interface FullAttRecord {
     id: string;
     staff_id: string;
@@ -1401,9 +1259,9 @@ interface FullAttRecord {
 type DayType = "present" | "late" | "absent" | "sunday" | "holiday" | "no_record";
 
 interface DaySummary {
-    date: string;           // YYYY-MM-DD
+    date: string;
     type: DayType;
-    label: string;          // readable status label
+    label: string;
     timeIn?: string;
     timeOut?: string;
     duration?: number | null;
@@ -1411,7 +1269,7 @@ interface DaySummary {
 
 interface StaffSummaryRow {
     member: StaffMember;
-    days: Record<string, DaySummary>; // keyed by YYYY-MM-DD
+    days: Record<string, DaySummary>;
     presentCount: number;
     lateCount: number;
     absentCount: number;
@@ -1419,14 +1277,11 @@ interface StaffSummaryRow {
     totalHours: number;
 }
 
-// Generate array of YYYY-MM-DD strings between two dates inclusive
-// Uses local date arithmetic to avoid UTC timezone shift
 function dateRange(from: string, to: string): string[] {
     const dates: string[] = [];
-    const cur = new Date(from + "T12:00:00"); // noon avoids DST/timezone edge cases
+    const cur = new Date(from + "T12:00:00");
     const end = new Date(to + "T12:00:00");
     while (cur <= end) {
-        // Use local date parts — never toISOString() which is UTC
         const y = cur.getFullYear();
         const m = String(cur.getMonth() + 1).padStart(2, "0");
         const d = String(cur.getDate()).padStart(2, "0");
@@ -1436,34 +1291,22 @@ function dateRange(from: string, to: string): string[] {
     return dates;
 }
 
-// Friendly label for a date type
 function dayTypeLabel(t: DayType): string {
     switch (t) {
         case "present": return "Present";
         case "late": return "Late";
         case "absent": return "Absent";
-        case "sunday": return "REST DAY";
+        case "sunday": return "REST";
         case "holiday": return "Holiday";
         case "no_record": return "—";
     }
 }
 
-function dayTypeDot(t: DayType): string {
-    switch (t) {
-        case "present": return "#10b981";
-        case "late": return "#f59e0b";
-        case "absent": return "#ef4444";
-        case "sunday": return "#7c3aed";
-        case "holiday": return "#0891b2";
-        case "no_record": return "#e2e8f0";
-    }
-}
-
 function dayTypeBg(t: DayType): string {
     switch (t) {
-        case "present": return "rgba(16,185,129,0.08)";
-        case "late": return "rgba(245,158,11,0.08)";
-        case "absent": return "rgba(239,68,68,0.08)";
+        case "present": return "rgba(16,185,129,0.12)";
+        case "late": return "rgba(245,158,11,0.12)";
+        case "absent": return "rgba(239,68,68,0.1)";
         case "sunday": return "rgba(124,58,237,0.08)";
         case "holiday": return "rgba(8,145,178,0.08)";
         case "no_record": return "transparent";
@@ -1481,9 +1324,9 @@ function dayTypeText(t: DayType): string {
     }
 }
 
+// Attendance Log View
 function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
     const today = localDateString();
-    // Default: current month
     const monthStart = today.slice(0, 8) + "01";
 
     const [fromDate, setFromDate] = useState(monthStart);
@@ -1492,7 +1335,7 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
     const [filterRole, setFilterRole] = useState<"all" | "staff" | "cashier">("all");
     const [records, setRecords] = useState<FullAttRecord[]>([]);
     const [loadingLog, setLoadingLog] = useState(false);
-    const [expandedStaff, setExpandedStaff] = useState<string | null>(null);
+    const [liveIndicator, setLiveIndicator] = useState(false);
 
     const fetchLog = useCallback(async () => {
         if (!fromDate || !toDate) return;
@@ -1502,9 +1345,7 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
                 .filter(m => filterStaff === "all" || m.id === filterStaff)
                 .filter(m => filterRole === "all" || m.role === filterRole)
                 .map(m => m.id);
-
             if (!ids.length) { setRecords([]); return; }
-
             const { data, error } = await supabase
                 .from("staff_attendance")
                 .select("id, staff_id, staff_name, staff_role, date, time_in, time_out, attendance_status, duration_minutes")
@@ -1512,21 +1353,45 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
                 .gte("date", fromDate)
                 .lte("date", toDate)
                 .order("date", { ascending: false });
-
             if (!error) setRecords((data ?? []) as FullAttRecord[]);
-        } catch { /* silent */ }
+        } catch { }
         finally { setLoadingLog(false); }
     }, [staffList, fromDate, toDate, filterStaff, filterRole]);
 
     useEffect(() => { if (staffList.length) fetchLog(); }, [fetchLog, staffList.length]);
 
-    // Build date range array
+    useEffect(() => {
+        const ch = supabase
+            .channel("att-log-realtime")
+            .on("postgres_changes", {
+                event: "*", schema: "public", table: "staff_attendance",
+            }, () => {
+                fetchLog();
+                setLiveIndicator(true);
+                setTimeout(() => setLiveIndicator(false), 2500);
+            })
+            .subscribe();
+        return () => { supabase.removeChannel(ch); };
+    }, [fetchLog]);
+
+    const shiftPeriod = (dir: -1 | 1) => {
+        const from = new Date(fromDate + "T12:00:00");
+        const to = new Date(toDate + "T12:00:00");
+        const diffMs = to.getTime() - from.getTime();
+        const diffDays = Math.round(diffMs / 86400000) + 1;
+        const newFrom = new Date(from);
+        newFrom.setDate(newFrom.getDate() + dir * diffDays);
+        const newTo = new Date(to);
+        newTo.setDate(newTo.getDate() + dir * diffDays);
+        const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        setFromDate(fmt(newFrom));
+        setToDate(fmt(newTo));
+    };
+
     const dates = fromDate && toDate ? dateRange(fromDate, toDate) : [];
-
-    // Only show dates that fit in the range (cap at 31 for column sanity)
     const visibleDates = dates.slice(0, 62);
+    const showScrollTable = visibleDates.length <= 31;
 
-    // Build summary rows per staff
     const filteredStaff = staffList
         .filter(m => filterStaff === "all" || m.id === filterStaff)
         .filter(m => filterRole === "all" || m.role === filterRole);
@@ -1540,200 +1405,220 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
         let presentCount = 0, lateCount = 0, absentCount = 0, offCount = 0, totalMins = 0;
 
         visibleDates.forEach(dateStr => {
-            const d = new Date(dateStr + "T12:00:00"); // noon prevents UTC midnight shift
+            const d = new Date(dateStr + "T12:00:00");
             const dayStatus = getDayStatus(d);
             const rec = recByDate[dateStr];
 
             if (dayStatus.type === "sunday") {
-                days[dateStr] = { date: dateStr, type: "sunday", label: "REST DAY" };
+                days[dateStr] = { date: dateStr, type: "sunday", label: "REST" };
                 offCount++;
             } else if (dayStatus.type === "holiday") {
                 days[dateStr] = { date: dateStr, type: "holiday", label: dayStatus.label };
                 offCount++;
             } else if (rec) {
                 const t = rec.attendance_status as DayType;
-                days[dateStr] = {
-                    date: dateStr, type: t, label: dayTypeLabel(t),
-                    timeIn: rec.time_in, timeOut: rec.time_out ?? undefined,
-                    duration: rec.duration_minutes,
-                };
+                days[dateStr] = { date: dateStr, type: t, label: dayTypeLabel(t), timeIn: rec.time_in, timeOut: rec.time_out ?? undefined, duration: rec.duration_minutes };
                 if (t === "present") presentCount++;
                 else if (t === "late") lateCount++;
                 else if (t === "absent") absentCount++;
                 if (rec.duration_minutes) totalMins += rec.duration_minutes;
             } else {
-                // Future dates or genuinely no record
-                const isFuture = new Date(dateStr + "T12:00:00") > new Date();
-                days[dateStr] = { date: dateStr, type: "no_record", label: isFuture ? "—" : "—" };
+                days[dateStr] = { date: dateStr, type: "no_record", label: "—" };
             }
         });
 
         return { member, days, presentCount, lateCount, absentCount, offCount, totalHours: totalMins / 60 };
     });
 
-    // Summary totals
     const totalPresent = rows.reduce((s, r) => s + r.presentCount, 0);
     const totalLate = rows.reduce((s, r) => s + r.lateCount, 0);
     const totalAbsent = rows.reduce((s, r) => s + r.absentCount, 0);
-    const totalOff = rows.reduce((s, r) => s + r.offCount, 0) / Math.max(rows.length, 1);
+    const totalHours = rows.reduce((s, r) => s + r.totalHours, 0);
 
-    const showScrollTable = visibleDates.length <= 31;
+    const workDayCount = visibleDates.filter(d => getDayStatus(new Date(d + "T12:00:00")).type === "workday").length;
+    const totalExpected = workDayCount * filteredStaff.length;
+    const overallRate = totalExpected > 0 ? Math.round(((totalPresent + totalLate) / totalExpected) * 100) : 0;
+
+    const presets = [
+        { label: "Today", from: today, to: today },
+        {
+            label: "This Week",
+            from: (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay() + 1); return localDateString(d); })(),
+            to: today,
+        },
+        { label: "This Month", from: today.slice(0, 8) + "01", to: today },
+        {
+            label: "Last Month",
+            from: (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return localDateString(d); })(),
+            to: (() => { const d = new Date(); d.setDate(0); return localDateString(d); })(),
+        },
+        {
+            label: "Last 7 Days",
+            from: (() => { const d = new Date(); d.setDate(d.getDate() - 6); return localDateString(d); })(),
+            to: today,
+        },
+    ];
+
+    const activePreset = presets.find(p => p.from === fromDate && p.to === toDate);
 
     return (
         <div className="space-y-4">
 
-            {/* Header */}
-            <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                    <h2 className="text-sm sm:text-base font-black text-slate-800 flex items-center gap-1.5">
-                        <Table2 size={15} className="text-teal-600 shrink-0" />
-                        Attendance Log
-                    </h2>
-                    <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 hidden sm:block">
-                        Filter by date range — includes Sunday (REST) and holiday (OFF) days
-                    </p>
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-8 h-8 bg-teal-50 rounded-xl flex items-center justify-center shrink-0">
+                        <Table2 size={14} className="text-teal-600" />
+                    </div>
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-sm font-black text-slate-800">Attendance Log</h2>
+                            <AnimatePresence>
+                                {liveIndicator && (
+                                    <motion.span initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
+                                        className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Updated
+                                    </motion.span>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                        <p className="text-[10px] text-slate-400 hidden sm:block">Realtime · includes REST days and holidays</p>
+                    </div>
                 </div>
                 <button onClick={fetchLog} disabled={loadingLog}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[0.72rem] sm:text-[0.75rem] font-black text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-100 transition-all disabled:opacity-50">
-                    {loadingLog ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-100 transition-all disabled:opacity-50 shrink-0">
+                    {loadingLog ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
                     Refresh
                 </button>
             </div>
 
-            {/* Filters */}
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-4">
-                <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
-
-                    {/* From */}
-                    <div>
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">From</p>
-                        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 ring-teal-400 transition-all" />
+            {/* Summary stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                {[
+                    { label: "Present", value: totalPresent, suffix: "d", dot: "#10b981", bg: "rgba(16,185,129,0.07)", text: "#059669", border: "rgba(16,185,129,0.18)" },
+                    { label: "Late", value: totalLate, suffix: "d", dot: "#f59e0b", bg: "rgba(245,158,11,0.07)", text: "#d97706", border: "rgba(245,158,11,0.18)" },
+                    { label: "Absent", value: totalAbsent, suffix: "d", dot: "#ef4444", bg: "rgba(239,68,68,0.07)", text: "#dc2626", border: "rgba(239,68,68,0.18)" },
+                    { label: "Total Hours", value: totalHours.toFixed(1), suffix: "h", dot: "#14b8a6", bg: "rgba(20,184,166,0.07)", text: "#0d9488", border: "rgba(20,184,166,0.18)" },
+                    { label: "Attendance Rate", value: overallRate, suffix: "%", dot: "#6366f1", bg: "rgba(99,102,241,0.07)", text: "#4f46e5", border: "rgba(99,102,241,0.18)" },
+                ].map(c => (
+                    <div key={c.label} className="rounded-2xl p-3 border flex flex-col gap-0.5" style={{ background: c.bg, borderColor: c.border }}>
+                        <div className="flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c.dot }} />
+                            <p className="text-[8.5px] font-black uppercase tracking-widest text-slate-400 leading-tight truncate">{c.label}</p>
+                        </div>
+                        <p className="text-xl font-black leading-none mt-0.5" style={{ color: c.text }}>
+                            {c.value}<span className="text-xs font-bold opacity-60">{c.suffix}</span>
+                        </p>
                     </div>
+                ))}
+            </div>
 
-                    {/* To */}
-                    <div>
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">To</p>
-                        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 ring-teal-400 transition-all" />
+            {/* Filter panel */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                    {presets.map(p => (
+                        <button key={p.label}
+                            onClick={() => { setFromDate(p.from); setToDate(p.to); }}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all border ${p.label === activePreset?.label
+                                ? "bg-teal-600 text-white border-teal-600 shadow-sm"
+                                : "bg-slate-50 text-slate-500 border-slate-200 hover:border-teal-300 hover:text-teal-600"}`}>
+                            {p.label}
+                        </button>
+                    ))}
+                </div>
+
+                <div className="flex items-center gap-2 mb-3">
+                    <button onClick={() => shiftPeriod(-1)}
+                        className="w-8 h-8 flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 hover:bg-teal-50 hover:border-teal-300 transition-colors text-slate-500 hover:text-teal-600 shrink-0">
+                        <ChevronLeft size={14} />
+                    </button>
+                    <div className="flex items-center gap-2 flex-1">
+                        <div className="flex-1">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">From</p>
+                            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 ring-teal-400 transition-all" />
+                        </div>
+                        <div className="text-slate-300 font-black text-sm pt-4">→</div>
+                        <div className="flex-1">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">To</p>
+                            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 ring-teal-400 transition-all" />
+                        </div>
                     </div>
+                    <button onClick={() => shiftPeriod(1)}
+                        className="w-8 h-8 flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 hover:bg-teal-50 hover:border-teal-300 transition-colors text-slate-500 hover:text-teal-600 shrink-0">
+                        <ChevronRight size={14} />
+                    </button>
+                </div>
 
-                    {/* Staff */}
+                <div className="grid grid-cols-2 gap-2">
                     <div>
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Staff Member</p>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Staff Member</p>
                         <select value={filterStaff} onChange={e => setFilterStaff(e.target.value)}
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 ring-teal-400 transition-all cursor-pointer">
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 ring-teal-400 transition-all cursor-pointer">
                             <option value="all">All Staff</option>
                             {staffList.map(m => (
                                 <option key={m.id} value={m.id}>{m.full_name} ({m.role})</option>
                             ))}
                         </select>
                     </div>
-
-                    {/* Role */}
                     <div>
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Role</p>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Role</p>
                         <select value={filterRole} onChange={e => setFilterRole(e.target.value as any)}
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 ring-teal-400 transition-all cursor-pointer">
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 ring-teal-400 transition-all cursor-pointer">
                             <option value="all">All Roles</option>
                             <option value="staff">Staff Worker</option>
                             <option value="cashier">Cashier</option>
                         </select>
                     </div>
                 </div>
-
-                {/* Quick preset buttons */}
-                <div className="flex flex-wrap gap-1.5 sm:gap-2 mt-3 pt-3 border-t border-slate-50">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest self-center mr-1">Quick:</p>
-                    {[
-                        { label: "This Week", from: (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay() + 1); return localDateString(d); })(), to: today },
-                        { label: "This Month", from: today.slice(0, 8) + "01", to: today },
-                        { label: "Last Month", from: (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return localDateString(d); })(), to: (() => { const d = new Date(); d.setDate(0); return localDateString(d); })() },
-                        { label: "Last 7 Days", from: (() => { const d = new Date(); d.setDate(d.getDate() - 6); return localDateString(d); })(), to: today },
-                        { label: "Last 30 Days", from: (() => { const d = new Date(); d.setDate(d.getDate() - 29); return localDateString(d); })(), to: today },
-                    ].map(p => (
-                        <button key={p.label}
-                            onClick={() => { setFromDate(p.from); setToDate(p.to); }}
-                            className={`px-2 sm:px-2.5 py-1 rounded-lg text-[9px] sm:text-[10px] font-black transition-all border ${fromDate === p.from && toDate === p.to
-                                ? "bg-teal-600 text-white border-teal-600"
-                                : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"}`}>
-                            {p.label}
-                        </button>
-                    ))}
-                </div>
             </div>
-
-            {/* Summary stat cards */}
-            {rows.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                        { label: "Present Days", value: totalPresent, dot: "#10b981", bg: "rgba(16,185,129,0.07)", text: "#059669", border: "rgba(16,185,129,0.15)" },
-                        { label: "Late Days", value: totalLate, dot: "#f59e0b", bg: "rgba(245,158,11,0.07)", text: "#d97706", border: "rgba(245,158,11,0.15)" },
-                        { label: "Absent Days", value: totalAbsent, dot: "#ef4444", bg: "rgba(239,68,68,0.07)", text: "#dc2626", border: "rgba(239,68,68,0.15)" },
-                        { label: "OFF Days (avg/staff)", value: Math.round(totalOff), dot: "#7c3aed", bg: "rgba(124,58,237,0.07)", text: "#7c3aed", border: "rgba(124,58,237,0.15)" },
-                    ].map(c => (
-                        <div key={c.label} className="bg-white rounded-2xl p-2.5 sm:p-3.5 border shadow-sm" style={{ borderColor: c.border }}>
-                            <div className="flex items-center gap-1.5 mb-1.5">
-                                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.dot }} />
-                                <p className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest text-slate-400 leading-tight">{c.label}</p>
-                            </div>
-                            <p className="text-xl sm:text-2xl font-black" style={{ color: c.text, fontFamily: "Syne, sans-serif" }}>{c.value}</p>
-                        </div>
-                    ))}
-                </div>
-            )}
 
             {/* Main table */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <CalendarDays size={14} className="text-teal-600" />
-                        <p className="font-black text-slate-800 text-xs sm:text-sm truncate max-w-[180px] sm:max-w-none">
-                            {fromDate} → {toDate}
+                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2"
+                    style={{ background: "#f8fafc" }}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <CalendarDays size={13} className="text-teal-600" />
+                        <p className="font-black text-slate-800 text-xs">
+                            {fromDate === toDate ? formatDate(fromDate) : `${fromDate} → ${toDate}`}
                         </p>
-                        <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 sm:px-2 py-0.5 rounded-full whitespace-nowrap">
+                        <span className="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">
                             {visibleDates.length}d · {filteredStaff.length} staff
                         </span>
+                        {loadingLog && <Loader2 size={11} className="animate-spin text-teal-500" />}
                     </div>
-
-                    {/* Legend */}
-                    <div className="hidden md:flex items-center gap-2 lg:gap-3 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
                         {[
-                            { dot: "#10b981", label: "Present" },
-                            { dot: "#f59e0b", label: "Late" },
-                            { dot: "#ef4444", label: "Absent" },
-                            { dot: "#7c3aed", label: "REST" },
-                            { dot: "#0891b2", label: "Holiday" },
-                        ].map(l => (
-                            <div key={l.label} className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full" style={{ background: l.dot }} />
-                                <span className="text-[9px] font-bold text-slate-500">{l.label}</span>
+                            { code: "P", label: "Present", color: "#059669", bg: "rgba(16,185,129,0.12)" },
+                            { code: "L", label: "Late", color: "#d97706", bg: "rgba(245,158,11,0.12)" },
+                            { code: "A", label: "Absent", color: "#dc2626", bg: "rgba(239,68,68,0.1)" },
+                            { code: "R", label: "REST", color: "#7c3aed", bg: "rgba(124,58,237,0.08)" },
+                            { code: "H", label: "Holiday", color: "#0891b2", bg: "rgba(8,145,178,0.08)" },
+                        ].map(k => (
+                            <div key={k.code} className="flex items-center gap-1">
+                                <span className="w-5 h-4 rounded text-[8px] font-black flex items-center justify-center"
+                                    style={{ background: k.bg, color: k.color }}>{k.code}</span>
+                                <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">{k.label}</span>
                             </div>
                         ))}
                     </div>
                 </div>
 
-                {loadingLog ? (
-                    <div className="flex items-center justify-center py-16 gap-2 text-slate-400">
-                        <Loader2 size={16} className="animate-spin" />
-                        <span className="text-sm font-medium">Loading attendance log…</span>
-                    </div>
-                ) : filteredStaff.length === 0 ? (
-                    <div className="flex flex-col items-center py-16 text-slate-300">
-                        <Table2 size={32} className="mb-2 opacity-40" />
+                {filteredStaff.length === 0 ? (
+                    <div className="flex flex-col items-center py-12 text-slate-300">
+                        <Table2 size={28} className="mb-2 opacity-40" />
                         <p className="text-sm font-bold text-slate-400">No staff to display</p>
                     </div>
                 ) : showScrollTable ? (
-                    /* ── Scrollable day-by-day grid (≤31 days) ── */
                     <div className="overflow-x-auto">
-                        <table className="w-full text-xs border-collapse" style={{ minWidth: `${Math.max(320, 140 + visibleDates.length * 44)}px` }}>
+                        <table className="w-full text-xs border-collapse" style={{ minWidth: `${Math.max(320, 150 + visibleDates.length * 44)}px` }}>
                             <thead>
                                 <tr style={{ background: "#f8fafc" }}>
-                                    <th className="sticky left-0 bg-slate-50 z-10 px-2 sm:px-4 py-2 sm:py-3 text-left font-black text-slate-600 text-[9px] sm:text-[10px] uppercase tracking-wider whitespace-nowrap border-b border-r border-slate-100" style={{ minWidth: "130px" }}>
+                                    <th className="sticky left-0 bg-slate-50 z-10 px-3 py-3 text-left font-black text-slate-500 text-[9px] uppercase tracking-wider whitespace-nowrap border-b border-r border-slate-100"
+                                        style={{ minWidth: "140px" }}>
                                         Staff Member
                                     </th>
                                     {visibleDates.map(dateStr => {
-                                        // Use noon to avoid midnight UTC shift for display
                                         const d = new Date(dateStr + "T12:00:00");
                                         const ds = getDayStatus(d);
                                         const isOff = ds.type !== "workday";
@@ -1741,72 +1626,89 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
                                         const dayNum = d.getDate();
                                         const isToday = dateStr === today;
                                         return (
-                                            <th key={dateStr} className="px-1 py-2 text-center font-bold border-b border-slate-100 whitespace-nowrap" style={{ minWidth: "40px", background: isOff ? (ds.type === "sunday" ? "rgba(124,58,237,0.05)" : "rgba(8,145,178,0.05)") : isToday ? "rgba(20,184,166,0.05)" : "#f8fafc" }}>
-                                                <p className="text-[9px] font-bold" style={{ color: isOff ? (ds.type === "sunday" ? "#7c3aed" : "#0891b2") : isToday ? "#0d9488" : "#94a3b8" }}>{dayName}</p>
-                                                <p className="text-[11px] font-black" style={{ color: isOff ? (ds.type === "sunday" ? "#7c3aed" : "#0891b2") : isToday ? "#0d9488" : "#475569" }}>{dayNum}</p>
-                                                {isOff && <p className="text-[7px] font-black leading-none mt-0.5" style={{ color: ds.type === "sunday" ? "#7c3aed" : "#0891b2" }}>OFF</p>}
-                                                {isToday && !isOff && <p className="text-[7px] font-black text-teal-500 leading-none mt-0.5">TODAY</p>}
+                                            <th key={dateStr} className="px-0.5 py-2 text-center font-bold border-b border-slate-100 whitespace-nowrap"
+                                                style={{
+                                                    minWidth: "42px",
+                                                    background: isOff
+                                                        ? (ds.type === "sunday" ? "rgba(124,58,237,0.04)" : "rgba(8,145,178,0.04)")
+                                                        : isToday ? "rgba(20,184,166,0.06)" : "#f8fafc"
+                                                }}>
+                                                <p className="text-[8.5px] font-bold leading-none"
+                                                    style={{ color: isOff ? (ds.type === "sunday" ? "#7c3aed" : "#0891b2") : isToday ? "#0d9488" : "#94a3b8" }}>
+                                                    {dayName}
+                                                </p>
+                                                <p className="text-[11px] font-black leading-tight mt-0.5"
+                                                    style={{ color: isOff ? (ds.type === "sunday" ? "#7c3aed" : "#0891b2") : isToday ? "#0d9488" : "#475569" }}>
+                                                    {dayNum}
+                                                </p>
+                                                {isToday && !isOff && (
+                                                    <span className="block text-[6.5px] font-black text-teal-500 leading-none mt-0.5">TODAY</span>
+                                                )}
                                             </th>
                                         );
                                     })}
-                                    <th className="px-2 sm:px-3 py-2 sm:py-3 text-center font-black text-slate-600 text-[9px] sm:text-[10px] uppercase tracking-wider border-b border-l border-slate-100 whitespace-nowrap bg-slate-50">
+                                    <th className="px-3 py-3 text-center font-black text-slate-500 text-[9px] uppercase tracking-wider border-b border-l border-slate-100 whitespace-nowrap bg-slate-50">
                                         Summary
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-50">
+                            <tbody>
                                 {rows.map((row, ri) => (
-                                    <tr key={row.member.id} className={ri % 2 === 0 ? "bg-white" : "bg-slate-50/30"}>
-                                        {/* Staff name cell — sticky */}
-                                        <td className="sticky left-0 bg-white z-10 px-2 sm:px-3 py-2 border-r border-slate-100 whitespace-nowrap" style={{ background: ri % 2 === 0 ? "white" : "#fafafa" }}>
-                                            <div className="flex items-center gap-1.5">
-                                                <div className={`w-6 h-6 sm:w-7 sm:h-7 rounded-lg sm:rounded-xl bg-gradient-to-br ${avatarGradient(row.member.full_name)} flex items-center justify-center shrink-0`}>
-                                                    <span className="text-[8px] sm:text-[9px] font-black text-white">{initials(row.member.full_name)}</span>
+                                    <tr key={row.member.id}
+                                        className="border-b border-slate-50 hover:bg-teal-50/30 transition-colors"
+                                        style={{ background: ri % 2 === 0 ? "white" : "rgba(248,250,252,0.6)" }}>
+                                        <td className="sticky left-0 z-10 px-3 py-3 border-r border-slate-100 whitespace-nowrap"
+                                            style={{ background: ri % 2 === 0 ? "white" : "rgba(248,250,252,0.95)" }}>
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-7 h-7 rounded-xl bg-gradient-to-br ${avatarGradient(row.member.full_name)} flex items-center justify-center shrink-0`}>
+                                                    <span className="text-[9px] font-black text-white">{initials(row.member.full_name)}</span>
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <p className="text-[10px] sm:text-[11px] font-black text-slate-800 leading-tight truncate max-w-[80px] sm:max-w-none">{row.member.full_name}</p>
-                                                    <p className="text-[8px] sm:text-[9px] text-slate-400 capitalize">{row.member.role}</p>
+                                                    <p className="text-[11px] font-black text-slate-800 leading-tight truncate max-w-[90px]">{row.member.full_name}</p>
+                                                    <p className="text-[8.5px] text-slate-400 capitalize">{row.member.role}</p>
                                                 </div>
                                             </div>
                                         </td>
-
-                                        {/* Day cells */}
                                         {visibleDates.map(dateStr => {
                                             const day = row.days[dateStr];
-                                            if (!day) return <td key={dateStr} className="px-1 py-2 text-center border-slate-50"><span className="text-[9px] text-slate-200">—</span></td>;
+                                            if (!day) return (
+                                                <td key={dateStr} className="px-0.5 py-2 text-center">
+                                                    <span className="text-[9px] text-slate-200">—</span>
+                                                </td>
+                                            );
+                                            const isToday = dateStr === today;
                                             return (
-                                                <td key={dateStr} className="px-0.5 py-1.5 text-center">
-                                                    <div className="flex items-center justify-center">
-                                                        <span
-                                                            className="inline-flex items-center justify-center w-7 h-6 rounded-lg text-[8.5px] font-black"
-                                                            style={{ background: dayTypeBg(day.type), color: dayTypeText(day.type) }}
-                                                            title={day.type === "holiday" ? day.label : dayTypeLabel(day.type)}>
-                                                            {day.type === "present" ? "P" :
-                                                                day.type === "late" ? "L" :
-                                                                    day.type === "absent" ? "A" :
-                                                                        day.type === "sunday" ? "R" :
-                                                                            day.type === "holiday" ? "H" : "—"}
-                                                        </span>
-                                                    </div>
+                                                <td key={dateStr} className="px-0.5 py-2 text-center"
+                                                    style={{ background: isToday && day.type !== "sunday" && day.type !== "holiday" ? "rgba(20,184,166,0.03)" : undefined }}>
+                                                    <span
+                                                        className="inline-flex items-center justify-center w-8 h-6 rounded-lg text-[8.5px] font-black transition-all"
+                                                        style={{ background: dayTypeBg(day.type), color: dayTypeText(day.type) }}
+                                                        title={day.type === "holiday" ? day.label :
+                                                            day.timeIn ? `${formatTime(day.timeIn)}${day.timeOut ? ` – ${formatTime(day.timeOut)}` : " (active)"}` :
+                                                                dayTypeLabel(day.type)}>
+                                                        {day.type === "present" ? "P" :
+                                                            day.type === "late" ? "L" :
+                                                                day.type === "absent" ? "A" :
+                                                                    day.type === "sunday" ? "R" :
+                                                                        day.type === "holiday" ? "H" : "—"}
+                                                    </span>
                                                 </td>
                                             );
                                         })}
-
-                                        {/* Summary cell */}
-                                        <td className="px-3 py-2.5 border-l border-slate-100 whitespace-nowrap">
-                                            <div className="flex items-center gap-1.5 flex-wrap justify-center">
-                                                {[
-                                                    { val: row.presentCount, dot: "#10b981", tip: "Present" },
-                                                    { val: row.lateCount, dot: "#f59e0b", tip: "Late" },
-                                                    { val: row.absentCount, dot: "#ef4444", tip: "Absent" },
-                                                    { val: row.offCount, dot: "#7c3aed", tip: "OFF" },
-                                                ].map(s => (
-                                                    <span key={s.tip} className="flex items-center gap-0.5 text-[9px] font-black" style={{ color: s.dot }} title={s.tip}>
-                                                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
-                                                        {s.val}
-                                                    </span>
-                                                ))}
-                                                <span className="text-[9px] text-slate-400 font-bold ml-1">{row.totalHours.toFixed(1)}h</span>
+                                        <td className="px-3 py-3 border-l border-slate-100 whitespace-nowrap">
+                                            <div className="flex flex-col gap-1">
+                                                <div className="flex items-center gap-2">
+                                                    {[
+                                                        { val: row.presentCount, color: "#059669", label: "P" },
+                                                        { val: row.lateCount, color: "#d97706", label: "L" },
+                                                        { val: row.absentCount, color: "#dc2626", label: "A" },
+                                                    ].map(s => (
+                                                        <span key={s.label} className="text-[10px] font-black" style={{ color: s.color }}>
+                                                            {s.label}{s.val}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                                <span className="text-[9px] font-bold text-slate-400">{row.totalHours.toFixed(1)}h</span>
                                             </div>
                                         </td>
                                     </tr>
@@ -1815,22 +1717,21 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
                         </table>
                     </div>
                 ) : (
-                    /* ── Summary table for longer ranges (>31 days) ── */
                     <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                             <thead>
                                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
                                     {["Staff Member", "Present", "Late", "Absent", "OFF Days", "Total Hours", "Attendance %"].map(h => (
-                                        <th key={h} className="px-4 py-3 text-left font-black text-slate-500 text-[10px] uppercase tracking-wider whitespace-nowrap">{h}</th>
+                                        <th key={h} className="px-4 py-3 text-left font-black text-slate-500 text-[9px] uppercase tracking-wider whitespace-nowrap">{h}</th>
                                     ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
                                 {rows.map((row, i) => {
-                                    const workDays = visibleDates.filter(d => getDayStatus(new Date(d + "T12:00:00")).type === "workday").length;
-                                    const showRate = workDays > 0 ? Math.round(((row.presentCount + row.lateCount) / workDays) * 100) : 0;
+                                    const showRate = workDayCount > 0 ? Math.round(((row.presentCount + row.lateCount) / workDayCount) * 100) : 0;
+                                    const rateColor = showRate >= 90 ? "#059669" : showRate >= 70 ? "#d97706" : "#dc2626";
                                     return (
-                                        <tr key={row.member.id} className={`hover:bg-slate-50 transition-colors ${i % 2 === 0 ? "bg-white" : "bg-slate-50/30"}`}>
+                                        <tr key={row.member.id} className={`hover:bg-slate-50/60 transition-colors ${i % 2 === 0 ? "bg-white" : "bg-slate-50/30"}`}>
                                             <td className="px-4 py-3 whitespace-nowrap">
                                                 <div className="flex items-center gap-2">
                                                     <div className={`w-7 h-7 rounded-xl bg-gradient-to-br ${avatarGradient(row.member.full_name)} flex items-center justify-center shrink-0`}>
@@ -1838,7 +1739,7 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
                                                     </div>
                                                     <div>
                                                         <p className="font-black text-slate-800 text-[11px]">{row.member.full_name}</p>
-                                                        <p className="text-[9px] text-slate-400 capitalize">{row.member.role}</p>
+                                                        <p className="text-[8.5px] text-slate-400 capitalize">{row.member.role}</p>
                                                     </div>
                                                 </div>
                                             </td>
@@ -1863,17 +1764,15 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
                                                     <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />{row.offCount}d
                                                 </span>
                                             </td>
-                                            <td className="px-4 py-3 whitespace-nowrap font-black text-teal-600 text-[11px]">
-                                                {row.totalHours.toFixed(1)}h
+                                            <td className="px-4 py-3 whitespace-nowrap">
+                                                <span className="font-black text-teal-600 text-[11px]">{row.totalHours.toFixed(1)}h</span>
                                             </td>
                                             <td className="px-4 py-3 whitespace-nowrap">
                                                 <div className="flex items-center gap-2">
-                                                    <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden" style={{ width: "60px" }}>
-                                                        <div className="h-full rounded-full" style={{ width: `${showRate}%`, background: showRate >= 90 ? "#10b981" : showRate >= 70 ? "#f59e0b" : "#ef4444" }} />
+                                                    <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden" style={{ width: "52px" }}>
+                                                        <div className="h-full rounded-full transition-all" style={{ width: `${showRate}%`, background: rateColor }} />
                                                     </div>
-                                                    <span className="text-[10px] font-black" style={{ color: showRate >= 90 ? "#059669" : showRate >= 70 ? "#d97706" : "#dc2626" }}>
-                                                        {showRate}%
-                                                    </span>
+                                                    <span className="text-[10px] font-black" style={{ color: rateColor }}>{showRate}%</span>
                                                 </div>
                                             </td>
                                         </tr>
@@ -1881,27 +1780,6 @@ function AttendanceLogView({ staffList }: { staffList: StaffMember[] }) {
                                 })}
                             </tbody>
                         </table>
-                    </div>
-                )}
-
-                {/* Table legend footer */}
-                {showScrollTable && rows.length > 0 && (
-                    <div className="px-3 sm:px-4 py-3 border-t border-slate-50 bg-slate-50/50 flex flex-wrap gap-2 sm:gap-3 items-center">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Key:</span>
-                        {[
-                            { code: "P", label: "Present", dot: "#10b981" },
-                            { code: "L", label: "Late", dot: "#f59e0b" },
-                            { code: "A", label: "Absent", dot: "#ef4444" },
-                            { code: "R", label: "REST (Sunday)", dot: "#7c3aed" },
-                            { code: "H", label: "Holiday (OFF)", dot: "#0891b2" },
-                            { code: "—", label: "No record", dot: "#cbd5e1" },
-                        ].map(k => (
-                            <div key={k.code} className="flex items-center gap-1.5">
-                                <span className="w-5 h-4 rounded text-[8px] font-black flex items-center justify-center"
-                                    style={{ background: k.dot + "18", color: k.dot }}>{k.code}</span>
-                                <span className="text-[9px] text-slate-500 font-medium">{k.label}</span>
-                            </div>
-                        ))}
                     </div>
                 )}
             </div>
@@ -1922,10 +1800,8 @@ export default function StaffView() {
     const [deleteTarget, setDeleteTarget] = useState<StaffMember | null>(null);
     const [attendanceTarget, setAttendanceTarget] = useState<StaffMember | null>(null);
     const [storeName, setStoreName] = useState("My Store");
-    // Set of staff ids currently online (tracked via Supabase Realtime Presence)
     const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
 
-    // Fetch staff + latest attendance for each member
     const fetchStaff = useCallback(async () => {
         setLoading(true);
         try {
@@ -1953,9 +1829,7 @@ export default function StaffView() {
 
                 const map: Record<string, AttendanceRecord | null> = {};
                 ids.forEach(id => { map[id] = null; });
-                (attData ?? []).forEach(r => {
-                    if (!map[r.staff_id]) map[r.staff_id] = r;
-                });
+                (attData ?? []).forEach(r => { if (!map[r.staff_id]) map[r.staff_id] = r; });
                 setAttendanceMap(map);
             }
         } catch {
@@ -1963,33 +1837,23 @@ export default function StaffView() {
         } finally { setLoading(false); }
     }, []);
 
-    // Lightweight re-fetch: only updates the attendance map for given staff ids
     const fetchAttendanceOnly = useCallback(async (staffIds: string[]) => {
         if (!staffIds.length) return;
-        try {
-            const { data: attData } = await supabase
-                .from("staff_attendance")
-                .select("*")
-                .in("staff_id", staffIds)
-                .order("time_in", { ascending: false });
-
-            setAttendanceMap(prev => {
-                const next = { ...prev };
-                staffIds.forEach(id => { next[id] = null; });
-                (attData ?? []).forEach((r: AttendanceRecord) => {
-                    if (!next[r.staff_id]) next[r.staff_id] = r;
-                });
-                return next;
-            });
-        } catch {
-            // Silent — non-critical
-        }
+        const { data: attData } = await supabase
+            .from("staff_attendance")
+            .select("*")
+            .in("staff_id", staffIds)
+            .order("time_in", { ascending: false });
+        setAttendanceMap(prev => {
+            const next = { ...prev };
+            staffIds.forEach(id => { next[id] = null; });
+            (attData ?? []).forEach((r: AttendanceRecord) => { if (!next[r.staff_id]) next[r.staff_id] = r; });
+            return next;
+        });
     }, []);
 
     useEffect(() => {
-        // Initial data load
         fetchStaff();
-
         let staffChannel: ReturnType<typeof supabase.channel> | null = null;
         let attChannel: ReturnType<typeof supabase.channel> | null = null;
 
@@ -1997,33 +1861,17 @@ export default function StaffView() {
             if (!user) return;
             const ownerId = user.id;
 
-            // Realtime: staff_members changes (add, edit, delete, status toggle)
-            staffChannel = supabase
-                .channel("rt:staff_members")
-                .on(
-                    "postgres_changes",
-                    { event: "*", schema: "public", table: "staff_members", filter: `owner_id=eq.${ownerId}` },
-                    () => fetchStaff()
-                )
+            staffChannel = supabase.channel("rt:staff_members")
+                .on("postgres_changes", { event: "*", schema: "public", table: "staff_members", filter: `owner_id=eq.${ownerId}` }, () => fetchStaff())
                 .subscribe();
 
-            // Realtime: staff_attendance changes (clock-in, clock-out)
-            attChannel = supabase
-                .channel("rt:staff_attendance")
-                .on(
-                    "postgres_changes",
-                    { event: "*", schema: "public", table: "staff_attendance", filter: `owner_id=eq.${ownerId}` },
-                    (payload) => {
-                        const row = (payload.new ?? payload.old) as { staff_id?: string } | null;
-                        const sid = row?.staff_id;
-                        if (sid) {
-                            // Only refresh attendance for the affected staff member
-                            fetchAttendanceOnly([sid]);
-                        } else {
-                            fetchStaff();
-                        }
-                    }
-                )
+            attChannel = supabase.channel("rt:staff_attendance")
+                .on("postgres_changes", { event: "*", schema: "public", table: "staff_attendance", filter: `owner_id=eq.${ownerId}` }, (payload) => {
+                    const row = (payload.new ?? payload.old) as { staff_id?: string } | null;
+                    const sid = row?.staff_id;
+                    if (sid) fetchAttendanceOnly([sid]);
+                    else fetchStaff();
+                })
                 .subscribe();
         });
 
@@ -2033,46 +1881,27 @@ export default function StaffView() {
         };
     }, [fetchStaff, fetchAttendanceOnly]);
 
-    // Presence channel — tracks which staff are online right now
+    // Presence channel
     useEffect(() => {
         let presenceChannel: ReturnType<typeof supabase.channel> | null = null;
-
         supabase.auth.getUser().then(({ data: { user } }) => {
             if (!user) return;
-            const ownerId = user.id;
-
-            // Channel name is scoped per owner so staff from different stores don't bleed through
-            presenceChannel = supabase.channel(`presence:staff:${ownerId}`);
-
-            presenceChannel
+            presenceChannel = supabase.channel(`presence:staff:${user.id}`)
                 .on("presence", { event: "sync" }, () => {
                     const state = presenceChannel!.presenceState<{ staff_id: string }>();
                     const ids = new Set<string>();
-                    Object.values(state).forEach(presences =>
-                        presences.forEach(p => { if (p.staff_id) ids.add(p.staff_id); })
-                    );
+                    Object.values(state).forEach(presences => presences.forEach((p: any) => { if (p.staff_id) ids.add(p.staff_id); }));
                     setOnlineIds(ids);
                 })
                 .on("presence", { event: "join" }, ({ newPresences }) => {
-                    setOnlineIds(prev => {
-                        const next = new Set(prev);
-                        newPresences.forEach((p: any) => { if (p.staff_id) next.add(p.staff_id); });
-                        return next;
-                    });
+                    setOnlineIds(prev => { const next = new Set(prev); newPresences.forEach((p: any) => { if (p.staff_id) next.add(p.staff_id); }); return next; });
                 })
                 .on("presence", { event: "leave" }, ({ leftPresences }) => {
-                    setOnlineIds(prev => {
-                        const next = new Set(prev);
-                        leftPresences.forEach((p: any) => { if (p.staff_id) next.delete(p.staff_id); });
-                        return next;
-                    });
+                    setOnlineIds(prev => { const next = new Set(prev); leftPresences.forEach((p: any) => { if (p.staff_id) next.delete(p.staff_id); }); return next; });
                 })
                 .subscribe();
         });
-
-        return () => {
-            if (presenceChannel) supabase.removeChannel(presenceChannel);
-        };
+        return () => { if (presenceChannel) supabase.removeChannel(presenceChannel); };
     }, []);
 
     const handleToggleStatus = async (member: StaffMember) => {
@@ -2106,12 +1935,9 @@ export default function StaffView() {
                 <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
                     className="relative overflow-hidden rounded-2xl sm:rounded-3xl"
                     style={{ background: "linear-gradient(135deg,#0f2027 0%,#134e4a 55%,#0f4c3a 100%)" }}>
-                    {/* Ambient blobs */}
                     <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "radial-gradient(circle at 15% 80%,rgba(20,184,166,.32) 0%,transparent 45%),radial-gradient(circle at 85% 15%,rgba(245,158,11,.2) 0%,transparent 40%),radial-gradient(circle at 60% 90%,rgba(8,145,178,.18) 0%,transparent 35%)" }} />
                     <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,1) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,1) 1px,transparent 1px)", backgroundSize: "36px 36px" }} />
-
                     <div className="relative p-4 sm:p-6 md:p-7">
-                        {/* Top row — title + button */}
                         <div className="flex items-start justify-between gap-3 mb-5">
                             <div className="min-w-0">
                                 <p className="text-teal-300 text-[10px] font-bold mb-1.5 flex items-center gap-1.5 uppercase tracking-widest">
@@ -2126,9 +1952,7 @@ export default function StaffView() {
                             </button>
                         </div>
 
-                        {/* Recharts stat cards */}
                         {(() => {
-                            // ── Card 1: Staff composition donut ──────────────────
                             const donutData = [
                                 { name: "Active", value: activeCount, fill: "#10b981" },
                                 { name: "Inactive", value: inactiveCount, fill: "rgba(255,255,255,0.15)" },
@@ -2136,15 +1960,10 @@ export default function StaffView() {
                             ].filter(d => d.value > 0);
                             if (donutData.length === 0) donutData.push({ name: "None", value: 1, fill: "rgba(255,255,255,0.08)" });
 
-                            // ── Card 2: Role split bar ───────────────────────────
                             const cashierCount = staffList.filter(m => m.role === "cashier").length;
                             const workerCount = staffList.filter(m => m.role === "staff").length;
-                            const roleData = [
-                                { role: "Staff", count: workerCount },
-                                { role: "Cashier", count: cashierCount },
-                            ];
+                            const roleData = [{ role: "Staff", count: workerCount }, { role: "Cashier", count: cashierCount }];
 
-                            // ── Card 3: Clocked-in radial gauge ─────────────────
                             const gaugeTotal = activeCount || 1;
                             const gaugePct = Math.round((clockedInCount / gaugeTotal) * 100);
                             const radialData = [
@@ -2152,7 +1971,6 @@ export default function StaffView() {
                                 { name: "Out", value: 100 - gaugePct, fill: "rgba(255,255,255,0.08)" },
                             ];
 
-                            // ── Card 4: Online radial gauge ──────────────────────
                             const onlinePct = Math.round((onlineCount / (staffList.length || 1)) * 100);
                             const onlineData = [
                                 { name: "Online", value: onlinePct, fill: "#4ade80" },
@@ -2161,17 +1979,13 @@ export default function StaffView() {
 
                             return (
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-
-                                    {/* Card 1 — Staff Composition Donut */}
-                                    <div className="rounded-2xl p-3 sm:p-4 flex flex-col"
-                                        style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.13)" }}>
+                                    <div className="rounded-2xl p-3 sm:p-4 flex flex-col" style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.13)" }}>
                                         <p className="text-[9px] font-black text-white/50 uppercase tracking-widest mb-1">Team Split</p>
                                         <div className="flex items-center gap-2 flex-1">
                                             <div style={{ width: 64, height: 64, flexShrink: 0 }}>
                                                 <ResponsiveContainer width="100%" height="100%">
                                                     <PieChart>
-                                                        <Pie data={donutData} cx="50%" cy="50%" innerRadius={18} outerRadius={30}
-                                                            dataKey="value" strokeWidth={0} paddingAngle={2}>
+                                                        <Pie data={donutData} cx="50%" cy="50%" innerRadius={18} outerRadius={30} dataKey="value" strokeWidth={0} paddingAngle={2}>
                                                             {donutData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                                                         </Pie>
                                                     </PieChart>
@@ -2181,10 +1995,7 @@ export default function StaffView() {
                                                 <p className="text-2xl font-black text-white leading-none">{staffList.length}</p>
                                                 <p className="text-white/35 text-[9px]">total staff</p>
                                                 <div className="flex flex-col gap-0.5 mt-1">
-                                                    {[
-                                                        { dot: "#10b981", label: `${activeCount} active` },
-                                                        { dot: "rgba(255,255,255,0.3)", label: `${inactiveCount} inactive` },
-                                                    ].map(l => (
+                                                    {[{ dot: "#10b981", label: `${activeCount} active` }, { dot: "rgba(255,255,255,0.3)", label: `${inactiveCount} inactive` }].map(l => (
                                                         <div key={l.label} className="flex items-center gap-1">
                                                             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: l.dot }} />
                                                             <span className="text-[9px] text-white/50 truncate">{l.label}</span>
@@ -2195,9 +2006,7 @@ export default function StaffView() {
                                         </div>
                                     </div>
 
-                                    {/* Card 2 — Role Bar Chart */}
-                                    <div className="rounded-2xl p-3 sm:p-4 flex flex-col"
-                                        style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.22)" }}>
+                                    <div className="rounded-2xl p-3 sm:p-4 flex flex-col" style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.22)" }}>
                                         <p className="text-[9px] font-black text-emerald-300/60 uppercase tracking-widest mb-1">By Role</p>
                                         <div style={{ height: 60 }} className="flex-1">
                                             <ResponsiveContainer width="100%" height="100%">
@@ -2205,33 +2014,23 @@ export default function StaffView() {
                                                     <XAxis dataKey="role" tick={{ fontSize: 8, fill: "rgba(255,255,255,0.45)", fontWeight: 700 }} axisLine={false} tickLine={false} />
                                                     <YAxis hide allowDecimals={false} />
                                                     <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                                                        <Cell fill="#f97316" />
-                                                        <Cell fill="#14b8a6" />
+                                                        <Cell fill="#f97316" /><Cell fill="#14b8a6" />
                                                     </Bar>
                                                 </BarChart>
                                             </ResponsiveContainer>
                                         </div>
                                         <div className="flex items-center justify-between mt-1">
-                                            <div className="flex items-center gap-1">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
-                                                <span className="text-[8px] text-white/40">{workerCount} worker{workerCount !== 1 ? "s" : ""}</span>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
-                                                <span className="text-[8px] text-white/40">{cashierCount} cashier{cashierCount !== 1 ? "s" : ""}</span>
-                                            </div>
+                                            <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-orange-400" /><span className="text-[8px] text-white/40">{workerCount} worker{workerCount !== 1 ? "s" : ""}</span></div>
+                                            <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-teal-400" /><span className="text-[8px] text-white/40">{cashierCount} cashier{cashierCount !== 1 ? "s" : ""}</span></div>
                                         </div>
                                     </div>
 
-                                    {/* Card 3 — Clocked-In Radial Gauge */}
-                                    <div className="rounded-2xl p-3 sm:p-4 flex flex-col"
-                                        style={{ background: "rgba(8,145,178,0.1)", border: "1px solid rgba(8,145,178,0.22)" }}>
+                                    <div className="rounded-2xl p-3 sm:p-4 flex flex-col" style={{ background: "rgba(8,145,178,0.1)", border: "1px solid rgba(8,145,178,0.22)" }}>
                                         <p className="text-[9px] font-black text-cyan-300/60 uppercase tracking-widest mb-0.5">On Shift</p>
                                         <div className="flex items-center gap-2 flex-1">
                                             <div style={{ width: 64, height: 64, position: "relative", flexShrink: 0 }}>
                                                 <ResponsiveContainer width="100%" height="100%">
-                                                    <RadialBarChart cx="50%" cy="50%" innerRadius={20} outerRadius={30}
-                                                        startAngle={90} endAngle={-270} data={radialData} barSize={10}>
+                                                    <RadialBarChart cx="50%" cy="50%" innerRadius={20} outerRadius={30} startAngle={90} endAngle={-270} data={radialData} barSize={10}>
                                                         <RadialBar dataKey="value" cornerRadius={4} background={false}>
                                                             {radialData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                                                         </RadialBar>
@@ -2249,7 +2048,6 @@ export default function StaffView() {
                                         </div>
                                     </div>
 
-                                    {/* Card 4 — Online Radial Gauge */}
                                     <div className="rounded-2xl p-3 sm:p-4 flex flex-col relative overflow-hidden"
                                         style={{ background: onlineCount > 0 ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.05)", border: onlineCount > 0 ? "1px solid rgba(34,197,94,0.25)" : "1px solid rgba(255,255,255,0.1)" }}>
                                         <div className="flex items-center gap-1.5 mb-0.5">
@@ -2259,8 +2057,7 @@ export default function StaffView() {
                                         <div className="flex items-center gap-2 flex-1">
                                             <div style={{ width: 64, height: 64, position: "relative", flexShrink: 0 }}>
                                                 <ResponsiveContainer width="100%" height="100%">
-                                                    <RadialBarChart cx="50%" cy="50%" innerRadius={20} outerRadius={30}
-                                                        startAngle={90} endAngle={-270} data={onlineData} barSize={10}>
+                                                    <RadialBarChart cx="50%" cy="50%" innerRadius={20} outerRadius={30} startAngle={90} endAngle={-270} data={onlineData} barSize={10}>
                                                         <RadialBar dataKey="value" cornerRadius={4} background={false}>
                                                             {onlineData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                                                         </RadialBar>
@@ -2272,16 +2069,11 @@ export default function StaffView() {
                                             </div>
                                             <div>
                                                 <p className="text-2xl font-black leading-none" style={{ color: onlineCount > 0 ? "#86efac" : "rgba(255,255,255,0.2)" }}>{onlineCount}</p>
-                                                <p className="text-[9px] mt-0.5" style={{ color: onlineCount > 0 ? "rgba(134,239,172,0.35)" : "rgba(255,255,255,0.2)" }}>
-                                                    of {staffList.length} staff
-                                                </p>
-                                                <p className="text-[8px] mt-1" style={{ color: onlineCount > 0 ? "rgba(134,239,172,0.25)" : "rgba(255,255,255,0.15)" }}>
-                                                    {onlineCount > 0 ? "online now" : "all offline"}
-                                                </p>
+                                                <p className="text-[9px] mt-0.5" style={{ color: onlineCount > 0 ? "rgba(134,239,172,0.35)" : "rgba(255,255,255,0.2)" }}>of {staffList.length} staff</p>
+                                                <p className="text-[8px] mt-1" style={{ color: onlineCount > 0 ? "rgba(134,239,172,0.25)" : "rgba(255,255,255,0.15)" }}>{onlineCount > 0 ? "online now" : "all offline"}</p>
                                             </div>
                                         </div>
                                     </div>
-
                                 </div>
                             );
                         })()}
@@ -2318,36 +2110,15 @@ export default function StaffView() {
                     <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2.5">
                         <div className="relative w-full sm:min-w-[200px] sm:flex-1 sm:max-w-xs">
                             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                            <input
-                                type="text" value={search}
-                                onChange={e => setSearch(e.target.value)}
+                            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
                                 placeholder="Search by name or email…"
                                 className="w-full pl-8 pr-4 py-2.5 bg-white rounded-xl text-sm font-medium text-slate-800 placeholder:text-slate-300 outline-none transition-all"
-                                style={{
-                                    border: search ? "1.5px solid #93c5fd" : "1.5px solid #e2e8f0",
-                                    boxShadow: search ? "0 0 0 3px rgba(37,99,235,0.08)" : "none",
-                                }}
-                            />
+                                style={{ border: search ? "1.5px solid #93c5fd" : "1.5px solid #e2e8f0", boxShadow: search ? "0 0 0 3px rgba(37,99,235,0.08)" : "none" }} />
                         </div>
-                        <DropdownSelect
-                            label="Role" value={filterRole}
-                            onSelect={v => setFilterRole(v as StaffRole | "all")}
-                            options={[
-                                { value: "all", label: "All Roles" },
-                                { value: "cashier", label: "Cashier", dot: "#0d9488" },
-                                { value: "staff", label: "Staff", dot: "#f97316" },
-                            ]}
-                        />
-                        <DropdownSelect
-                            label="Status" value={filterStatus}
-                            onSelect={v => setFilterStatus(v as StaffStatus | "all")}
-                            options={[
-                                { value: "all", label: "All Statuses" },
-                                { value: "active", label: "Active", dot: "#10b981" },
-                                { value: "inactive", label: "Inactive", dot: "#94a3b8" },
-                                { value: "pending", label: "Pending", dot: "#f59e0b" },
-                            ]}
-                        />
+                        <DropdownSelect label="Role" value={filterRole} onSelect={v => setFilterRole(v as StaffRole | "all")}
+                            options={[{ value: "all", label: "All Roles" }, { value: "cashier", label: "Cashier", dot: "#0d9488" }, { value: "staff", label: "Staff", dot: "#f97316" }]} />
+                        <DropdownSelect label="Status" value={filterStatus} onSelect={v => setFilterStatus(v as StaffStatus | "all")}
+                            options={[{ value: "all", label: "All Statuses" }, { value: "active", label: "Active", dot: "#10b981" }, { value: "inactive", label: "Inactive", dot: "#94a3b8" }, { value: "pending", label: "Pending", dot: "#f59e0b" }]} />
                         {anyFilterActive && (
                             <button onClick={resetFilters}
                                 className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-[0.75rem] font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-xl transition-colors w-full sm:w-auto">
@@ -2357,8 +2128,7 @@ export default function StaffView() {
                     </div>
                     {anyFilterActive && (
                         <p className="text-[0.68rem] text-slate-400 font-medium px-1">
-                            Showing <span className="font-black text-slate-700">{filtered.length}</span> of{" "}
-                            <span className="font-black text-slate-700">{staffList.length}</span> staff members
+                            Showing <span className="font-black text-slate-700">{filtered.length}</span> of <span className="font-black text-slate-700">{staffList.length}</span> staff members
                         </p>
                     )}
                 </div>
@@ -2372,16 +2142,10 @@ export default function StaffView() {
                                 <div className="p-4 space-y-3">
                                     <div className="flex items-center gap-3">
                                         <Skeleton className="w-11 h-11 rounded-2xl shrink-0" />
-                                        <div className="flex-1 space-y-1.5">
-                                            <Skeleton className="h-3 w-3/4" />
-                                            <Skeleton className="h-2 w-1/2" />
-                                        </div>
+                                        <div className="flex-1 space-y-1.5"><Skeleton className="h-3 w-3/4" /><Skeleton className="h-2 w-1/2" /></div>
                                     </div>
                                     <Skeleton className="h-6 w-20 rounded-xl" />
-                                    <div className="space-y-1.5">
-                                        <Skeleton className="h-2 w-full" />
-                                        <Skeleton className="h-2 w-3/4" />
-                                    </div>
+                                    <div className="space-y-1.5"><Skeleton className="h-2 w-full" /><Skeleton className="h-2 w-3/4" /></div>
                                 </div>
                             </div>
                         ))}
@@ -2393,10 +2157,7 @@ export default function StaffView() {
                         <Search size={28} className="text-slate-200 mb-3" />
                         <p className="text-sm font-bold text-slate-400">No matching staff found</p>
                         <p className="text-xs text-slate-300 mt-1">Try adjusting your search or filters</p>
-                        <button onClick={resetFilters}
-                            className="mt-4 text-xs font-black text-teal-600 hover:text-teal-700 transition-colors">
-                            Clear filters
-                        </button>
+                        <button onClick={resetFilters} className="mt-4 text-xs font-black text-teal-600 hover:text-teal-700 transition-colors">Clear filters</button>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
@@ -2422,7 +2183,6 @@ export default function StaffView() {
                     </p>
                 )}
 
-                {/* Today's attendance overview */}
                 {!loading && staffList.length > 0 && (
                     <TodayAttendancePanel
                         staffList={staffList}
@@ -2434,7 +2194,6 @@ export default function StaffView() {
                     />
                 )}
 
-                {/* Full attendance log with date range filter */}
                 {!loading && staffList.length > 0 && (
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5">
                         <AttendanceLogView staffList={staffList} />
