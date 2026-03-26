@@ -4,15 +4,22 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
-    Eye, EyeOff, Loader2, ShieldAlert, Terminal,
-    Lock, AtSign, ChevronRight, AlertOctagon, KeyRound,
-    RefreshCw, CheckCircle2, XCircle,
+    Mail, Lock, Eye, EyeOff, ArrowRight, Loader2,
+    ShieldCheck, KeyRound, RefreshCw, AlertTriangle,
+    Terminal, Activity, Database, Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/app/utils/supabase";
 import toast from "react-hot-toast";
 
 const ADMIN_EMAIL = "sarisariims77@gmail.com";
+
+const FEATURES = [
+    { icon: <Terminal size={14} />, text: "Full system control & oversight" },
+    { icon: <Activity size={14} />, text: "Real-time platform analytics" },
+    { icon: <Database size={14} />, text: "Database & user management" },
+];
+
 const OTP_LENGTH = 8;
 const MAX_ATTEMPTS = 3;
 
@@ -29,18 +36,8 @@ export default function AdminLoginPage() {
     const [errors, setErrors] = useState<{ email?: string; password?: string; otp?: string }>({});
     const [attempts, setAttempts] = useState(0);
     const [shake, setShake] = useState(false);
-    const [typedChars, setTypedChars] = useState(0);
     const autoSubmitRef = useRef(false);
-    const cursorRef = useRef<NodeJS.Timeout | null>(null);
-    const [showCursor, setShowCursor] = useState(true);
 
-    // Blinking cursor effect
-    useEffect(() => {
-        cursorRef.current = setInterval(() => setShowCursor(v => !v), 530);
-        return () => { if (cursorRef.current) clearInterval(cursorRef.current); };
-    }, []);
-
-    // Auto-submit OTP when all digits filled
     useEffect(() => {
         const token = otp.join("");
         if (token.length === OTP_LENGTH && !autoSubmitRef.current && step === "otp" && !loading) {
@@ -53,27 +50,18 @@ export default function AdminLoginPage() {
 
     const validate = () => {
         const errs: typeof errors = {};
-        if (!form.email) errs.email = "Email required.";
-        else if (form.email !== ADMIN_EMAIL) errs.email = "Unauthorized. Access denied.";
-        if (!form.password) errs.password = "Password required.";
+        if (!form.email) errs.email = "Email is required.";
+        else if (form.email !== ADMIN_EMAIL) errs.email = "Unauthorized. Admin access only.";
+        if (!form.password) errs.password = "Password is required.";
         return errs;
     };
 
     const handleCredentialsSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const errs = validate();
-        if (Object.keys(errs).length) { setErrors(errs); triggerShake(); return; }
+        if (Object.keys(errs).length) { setErrors(errs); return; }
         setErrors({});
         setLoading(true);
-
-        // Extra guard: block non-admin emails at network level too
-        if (form.email !== ADMIN_EMAIL) {
-            setLoading(false);
-            triggerShake();
-            toast.error("Access denied.");
-            setErrors({ email: "This portal is restricted to administrators only." });
-            return;
-        }
 
         const { error: signInError } = await supabase.auth.signInWithPassword({
             email: form.email,
@@ -82,9 +70,13 @@ export default function AdminLoginPage() {
 
         if (signInError) {
             setLoading(false);
-            triggerShake();
-            toast.error("Authentication failed.");
-            setErrors({ password: "Invalid credentials. Access denied." });
+            if (signInError.message.toLowerCase().includes("email")) {
+                toast.error("Please confirm your email first.");
+                setErrors({ email: "Email not confirmed. Check your inbox." });
+            } else {
+                toast.error("Invalid credentials.");
+                setErrors({ password: "Invalid credentials. Access denied." });
+            }
             return;
         }
 
@@ -98,11 +90,11 @@ export default function AdminLoginPage() {
         setLoading(false);
 
         if (otpError) {
-            toast.error("Failed to dispatch verification token.");
+            toast.error("Failed to send verification code. Try again.");
             return;
         }
 
-        toast.success("Verification token dispatched.");
+        toast.success(`Verification code sent to ${form.email}`);
         setAttempts(0);
         setOtp(Array(OTP_LENGTH).fill(""));
         autoSubmitRef.current = false;
@@ -115,7 +107,7 @@ export default function AdminLoginPage() {
         setErrors({});
         setLoading(true);
 
-        const { error } = await supabase.auth.verifyOtp({
+        const { data, error } = await supabase.auth.verifyOtp({
             email: form.email,
             token,
             type: "email",
@@ -128,7 +120,7 @@ export default function AdminLoginPage() {
             triggerShake();
 
             if (newAttempts >= MAX_ATTEMPTS) {
-                toast.error("Maximum attempts exceeded. Session terminated.", { duration: 3500 });
+                toast.error("Too many failed attempts. Please sign in again.", { duration: 3500 });
                 setLoading(true);
                 setTimeout(() => {
                     setStep("credentials");
@@ -140,8 +132,8 @@ export default function AdminLoginPage() {
                 }, 2200);
             } else {
                 const remaining = MAX_ATTEMPTS - newAttempts;
-                toast.error(`Token mismatch — ${remaining} attempt${remaining === 1 ? "" : "s"} left.`);
-                setErrors({ otp: `Invalid token. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.` });
+                toast.error(`Wrong code — ${remaining} attempt${remaining === 1 ? "" : "s"} left.`);
+                setErrors({ otp: `Invalid code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.` });
                 setOtp(Array(OTP_LENGTH).fill(""));
                 autoSubmitRef.current = false;
                 setTimeout(() => document.getElementById("otp-0")?.focus(), 80);
@@ -149,8 +141,18 @@ export default function AdminLoginPage() {
             return;
         }
 
+        // Verify the signed-in user is the admin
+        const user = data?.user;
+        if (!user || user.email !== ADMIN_EMAIL) {
+            await supabase.auth.signOut();
+            setLoading(false);
+            toast.error("Unauthorized account.");
+            setStep("credentials");
+            return;
+        }
+
         setLoading(false);
-        toast.success("Access granted. Redirecting...");
+        toast.success("Admin verified! Entering command center 🛡️");
         setTimeout(() => router.push("/admin"), 1000);
     };
 
@@ -158,7 +160,7 @@ export default function AdminLoginPage() {
         e.preventDefault();
         const token = otp.join("");
         if (token.length < OTP_LENGTH) {
-            setErrors({ otp: `Enter all ${OTP_LENGTH} digits.` });
+            setErrors({ otp: `Please enter all ${OTP_LENGTH} digits.` });
             return;
         }
         if (!autoSubmitRef.current) {
@@ -190,8 +192,8 @@ export default function AdminLoginPage() {
             options: { shouldCreateUser: false },
         });
         setLoading(false);
-        if (error) { toast.error("Failed to resend token."); return; }
-        toast.success("New token dispatched.");
+        if (error) { toast.error("Failed to resend code."); return; }
+        toast.success("New code sent!");
         setOtp(Array(OTP_LENGTH).fill(""));
         setAttempts(0);
         setErrors({});
@@ -222,689 +224,353 @@ export default function AdminLoginPage() {
         }
     };
 
+    const LeftPanel = () => (
+        <aside className="hidden lg:flex w-[480px] xl:w-[520px] flex-shrink-0 flex-col relative overflow-hidden"
+            style={{ background: "linear-gradient(155deg, #030a0f 0%, #061a14 50%, #0a3d2b 100%)" }}>
+            {/* Grid pattern */}
+            <div className="absolute inset-0 pointer-events-none opacity-[0.05]"
+                style={{ backgroundImage: "linear-gradient(rgba(16,185,129,1) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,1) 1px, transparent 1px)", backgroundSize: "36px 36px", animation: "gridFloat 25s linear infinite" }} />
+            {/* Glow orbs */}
+            <div className="absolute pointer-events-none" style={{ top: -80, right: -80, width: 400, height: 400, background: "radial-gradient(circle, rgba(16,185,129,0.18) 0%, transparent 65%)" }} />
+            <div className="absolute pointer-events-none" style={{ bottom: -60, left: -60, width: 350, height: 350, background: "radial-gradient(circle, rgba(5,150,105,0.12) 0%, transparent 65%)" }} />
+            <div className="absolute pointer-events-none" style={{ top: "40%", left: "50%", transform: "translate(-50%,-50%)", width: 300, height: 300, background: "radial-gradient(circle, rgba(52,211,153,0.1) 0%, transparent 65%)" }} />
+
+            <div className="relative z-10 flex flex-col h-full p-10 xl:p-12">
+                {/* Logo */}
+                <Link href="/" className="flex items-center gap-3 no-underline mb-auto">
+                    <div className="relative w-10 h-10 flex-shrink-0">
+                        <Image src="/images/logo.png" alt="SariSari IMS" fill className="object-contain rounded-xl" sizes="40px" />
+                    </div>
+                    <div>
+                        <div className="text-white font-black text-lg leading-none" style={{ fontFamily: "Syne, sans-serif" }}>
+                            SariSari<span className="text-emerald-400">.</span>IMS
+                        </div>
+                        <div className="text-white/30 text-[0.52rem] font-bold uppercase tracking-widest mt-0.5">Admin Control Panel</div>
+                    </div>
+                </Link>
+
+                <div className="my-auto">
+                    <div className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 mb-7"
+                        style={{ background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.25)" }}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" style={{ boxShadow: "0 0 8px #34d399" }} />
+                        <span className="text-emerald-300 text-[0.68rem] font-bold uppercase tracking-[0.15em]">Super Admin</span>
+                    </div>
+                    <h2 className="font-black text-white leading-[1.08] mb-5"
+                        style={{ fontFamily: "Syne, sans-serif", fontSize: "2.8rem", letterSpacing: "-0.03em" }}>
+                        System<br />
+                        <span className="text-transparent bg-clip-text" style={{ backgroundImage: "linear-gradient(135deg, #34d399, #6ee7b7)" }}>
+                            Command Center.
+                        </span>
+                    </h2>
+                    <p className="text-slate-400/80 text-[0.95rem] leading-relaxed mb-8 max-w-[340px]">
+                        Restricted access. Only the authorized system administrator may proceed beyond this point.
+                    </p>
+                    <div className="space-y-3">
+                        {FEATURES.map((f, i) => (
+                            <div key={i} className="flex items-center gap-3">
+                                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                                    style={{ background: "rgba(16,185,129,0.15)", color: "#34d399" }}>{f.icon}</div>
+                                <span className="text-white/50 text-[0.85rem] font-medium">{f.text}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Stats */}
+                <div className="grid grid-cols-3 gap-3 mt-auto">
+                    {[{ val: "Root", label: "Access" }, { val: "Sys", label: "Admin" }, { val: "Live", label: "Monitor" }].map((s) => (
+                        <div key={s.label} className="rounded-2xl p-4 text-center"
+                            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(8px)" }}>
+                            <div className="text-emerald-400 font-black text-[1.1rem] leading-none mb-1" style={{ fontFamily: "Syne, sans-serif" }}>{s.val}</div>
+                            <div className="text-white/25 text-[0.6rem] font-bold uppercase tracking-widest">{s.label}</div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </aside>
+    );
+
     return (
         <>
             <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Bebas+Neue&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Syne:wght@700;800;900&display=swap');
+        * { font-family: 'Plus Jakarta Sans', sans-serif; }
+        h1, h2 { font-family: 'Syne', sans-serif; }
+        @keyframes gridFloat { 0% { background-position: 0 0; } 100% { background-position: 40px 40px; } }
+        @keyframes shimmerBar { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+        .otp-input:focus { border-color: #059669 !important; box-shadow: 0 0 0 3px rgba(5,150,105,0.15) !important; }
 
-        * { box-sizing: border-box; }
-
-        body { background: #060a0f; }
-
-        .admin-root {
-          font-family: 'Space Grotesk', sans-serif;
-          min-height: 100vh;
-          background: #060a0f;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          position: relative;
-          overflow: hidden;
-          padding: 24px 16px;
-        }
-
-        .mono { font-family: 'IBM Plex Mono', monospace; }
-        .bebas { font-family: 'Bebas Neue', sans-serif; }
-
-        /* Animated grid background */
-        .grid-bg {
-          position: fixed;
-          inset: 0;
-          pointer-events: none;
-          background-image:
-            linear-gradient(rgba(0,255,136,0.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0,255,136,0.04) 1px, transparent 1px);
-          background-size: 44px 44px;
-          animation: gridDrift 30s linear infinite;
-        }
-
-        @keyframes gridDrift {
-          0% { background-position: 0 0; }
-          100% { background-position: 44px 44px; }
-        }
-
-        /* Scanline overlay */
-        .scanlines {
-          position: fixed;
-          inset: 0;
-          pointer-events: none;
-          background: repeating-linear-gradient(
-            0deg,
-            transparent,
-            transparent 3px,
-            rgba(0,0,0,0.08) 3px,
-            rgba(0,0,0,0.08) 4px
-          );
-          z-index: 0;
-        }
-
-        /* Glow blobs */
-        .blob-1 {
-          position: fixed;
-          top: -120px; left: -120px;
-          width: 500px; height: 500px;
-          background: radial-gradient(circle, rgba(0,255,136,0.07) 0%, transparent 70%);
-          pointer-events: none;
-          animation: blobPulse 8s ease-in-out infinite;
-        }
-        .blob-2 {
-          position: fixed;
-          bottom: -100px; right: -100px;
-          width: 450px; height: 450px;
-          background: radial-gradient(circle, rgba(255,60,60,0.05) 0%, transparent 70%);
-          pointer-events: none;
-          animation: blobPulse 10s ease-in-out infinite reverse;
-        }
-
-        @keyframes blobPulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.6; transform: scale(1.1); }
-        }
-
-        /* Card */
-        .card {
-          position: relative;
-          z-index: 10;
-          width: 100%;
-          max-width: 480px;
-          background: rgba(10, 16, 26, 0.92);
-          border: 1px solid rgba(0,255,136,0.12);
-          border-radius: 4px;
-          padding: 40px 36px;
-          backdrop-filter: blur(20px);
-          box-shadow:
-            0 0 0 1px rgba(0,255,136,0.05),
-            0 32px 64px rgba(0,0,0,0.6),
-            inset 0 1px 0 rgba(255,255,255,0.04);
-        }
-
-        @media (max-width: 520px) {
-          .card { padding: 28px 20px; }
-        }
-
-        /* Corner accents */
-        .card::before, .card::after {
-          content: '';
-          position: absolute;
-          width: 16px; height: 16px;
-          border-color: rgba(0,255,136,0.4);
-          border-style: solid;
-        }
-        .card::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
-        .card::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
-
-        /* Status bar */
-        .status-bar {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          background: rgba(0,255,136,0.05);
-          border: 1px solid rgba(0,255,136,0.1);
-          border-radius: 2px;
-          padding: 6px 12px;
-          margin-bottom: 28px;
-        }
-
-        .status-dot {
-          width: 6px; height: 6px;
-          border-radius: 50%;
-          background: #00ff88;
-          box-shadow: 0 0 8px #00ff88;
-          animation: statusBlink 2s ease-in-out infinite;
-          flex-shrink: 0;
-        }
-
-        @keyframes statusBlink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
-
-        /* Input field */
-        .field-wrap {
-          position: relative;
-          margin-bottom: 16px;
-        }
-
-        .field-label {
-          display: block;
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 0.65rem;
-          font-weight: 600;
-          color: rgba(0,255,136,0.6);
-          letter-spacing: 0.2em;
-          text-transform: uppercase;
-          margin-bottom: 8px;
-        }
-
-        .field-input {
-          width: 100%;
-          background: rgba(0,255,136,0.03);
-          border: 1px solid rgba(0,255,136,0.15);
-          border-radius: 2px;
-          color: #e2ffe9;
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 0.88rem;
-          padding: 12px 44px 12px 44px;
-          outline: none;
-          transition: all 0.2s;
-        }
-
-        .field-input::placeholder { color: rgba(255,255,255,0.15); }
-
-        .field-input:focus {
-          border-color: rgba(0,255,136,0.45);
-          background: rgba(0,255,136,0.05);
-          box-shadow: 0 0 0 3px rgba(0,255,136,0.07), 0 0 20px rgba(0,255,136,0.05);
-        }
-
-        .field-input.error {
-          border-color: rgba(255,60,60,0.5);
-          background: rgba(255,60,60,0.03);
-          box-shadow: 0 0 0 3px rgba(255,60,60,0.07);
-        }
-
-        .field-icon {
-          position: absolute;
-          left: 14px;
-          top: 50%;
-          transform: translateY(-50%);
-          color: rgba(0,255,136,0.4);
-          pointer-events: none;
-        }
-
-        .field-icon.err { color: rgba(255,60,60,0.6); }
-
-        .field-error {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 0.68rem;
-          color: #ff5555;
-          margin-top: 5px;
-          display: flex;
-          align-items: center;
-          gap: 5px;
-        }
-
-        /* Submit button */
-        .submit-btn {
-          width: 100%;
-          position: relative;
-          overflow: hidden;
-          background: linear-gradient(135deg, rgba(0,255,136,0.15), rgba(0,200,100,0.1));
-          border: 1px solid rgba(0,255,136,0.3);
-          border-radius: 2px;
-          color: #00ff88;
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 0.82rem;
-          font-weight: 700;
-          letter-spacing: 0.15em;
-          text-transform: uppercase;
-          padding: 14px;
-          cursor: pointer;
-          transition: all 0.2s;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          margin-top: 20px;
-        }
-
-        .submit-btn:hover:not(:disabled) {
-          background: linear-gradient(135deg, rgba(0,255,136,0.22), rgba(0,200,100,0.16));
-          border-color: rgba(0,255,136,0.5);
-          box-shadow: 0 0 24px rgba(0,255,136,0.12);
-        }
-
-        .submit-btn:disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
-        }
-
-        .submit-btn .shimmer {
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(90deg, transparent, rgba(0,255,136,0.08), transparent);
-          animation: shimmer 1.5s ease-in-out infinite;
-          pointer-events: none;
-        }
-
-        @keyframes shimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
-        }
-
-        /* OTP boxes */
-        .otp-box {
-          width: 48px; height: 56px;
-          background: rgba(0,255,136,0.03);
-          border: 1px solid rgba(0,255,136,0.15);
-          border-radius: 2px;
-          color: #00ff88;
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 1.3rem;
-          font-weight: 700;
-          text-align: center;
-          outline: none;
-          transition: all 0.15s;
-          caret-color: #00ff88;
-        }
-
-        .otp-box:focus {
-          border-color: rgba(0,255,136,0.5);
-          background: rgba(0,255,136,0.07);
-          box-shadow: 0 0 12px rgba(0,255,136,0.1);
-        }
-
-        .otp-box.filled {
-          border-color: rgba(0,255,136,0.35);
-          background: rgba(0,255,136,0.06);
-        }
-
-        .otp-box.err {
-          border-color: rgba(255,60,60,0.45);
-          background: rgba(255,60,60,0.04);
-        }
-
-        .otp-box:disabled { opacity: 0.35; cursor: not-allowed; }
-
+        .otp-box { width: 46px; height: 54px; font-size: 1.2rem; }
         @media (max-width: 480px) {
-          .otp-box { width: 38px; height: 46px; font-size: 1rem; }
-          .otp-wrap { gap: 5px !important; }
+          .otp-box { width: 36px; height: 44px; font-size: 1rem; }
+          .otp-wrap { gap: 4px !important; }
         }
-
         @media (max-width: 360px) {
           .otp-box { width: 30px; height: 38px; font-size: 0.85rem; }
           .otp-wrap { gap: 3px !important; }
         }
-
-        /* Divider */
-        .divider {
-          border: none;
-          border-top: 1px solid rgba(0,255,136,0.07);
-          margin: 24px 0;
-        }
-
-        /* Back btn */
-        .back-btn {
-          width: 100%;
-          background: transparent;
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 2px;
-          color: rgba(255,255,255,0.3);
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 0.72rem;
-          letter-spacing: 0.1em;
-          padding: 10px;
-          cursor: pointer;
-          transition: all 0.2s;
-          margin-top: 8px;
-        }
-
-        .back-btn:hover:not(:disabled) {
-          color: rgba(255,255,255,0.6);
-          border-color: rgba(255,255,255,0.12);
-        }
-
-        .back-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-
-        /* Attempt indicators */
-        .attempt-pip {
-          width: 8px; height: 8px;
-          border-radius: 50%;
-          transition: all 0.3s;
-        }
-
-        /* Resend btn */
-        .resend-btn {
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 0.72rem;
-          font-weight: 600;
-          transition: color 0.2s;
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          padding: 0;
-        }
-
-        /* Restricted notice */
-        .restricted-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          background: rgba(255,60,60,0.07);
-          border: 1px solid rgba(255,60,60,0.15);
-          border-radius: 2px;
-          padding: 5px 10px;
-          margin-bottom: 20px;
-        }
-
-        /* Owner portal link */
-        .portal-link {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          color: rgba(255,255,255,0.2);
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 0.68rem;
-          letter-spacing: 0.1em;
-          text-decoration: none;
-          transition: color 0.2s;
-          margin-top: 16px;
-        }
-
-        .portal-link:hover { color: rgba(255,255,255,0.45); }
       `}</style>
 
-            <div className="admin-root">
-                <div className="grid-bg" />
-                <div className="scanlines" />
-                <div className="blob-1" />
-                <div className="blob-2" />
+            <div className="min-h-screen flex">
+                <LeftPanel />
 
-                <AnimatePresence mode="wait">
+                <main className="flex-1 flex items-center justify-center p-6 md:p-10 overflow-y-auto"
+                    style={{ background: "#0d1117" }}>
+                    <AnimatePresence mode="wait">
 
-                    {/* ── STEP 1: Credentials ── */}
-                    {step === "credentials" && (
-                        <motion.div
-                            key="creds"
-                            initial={{ opacity: 0, scale: 0.97 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.96 }}
-                            transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                            className="card"
-                        >
-                            {/* Status bar */}
-                            <div className="status-bar">
-                                <span className="status-dot" />
-                                <span className="mono" style={{ fontSize: "0.65rem", color: "rgba(0,255,136,0.6)", letterSpacing: "0.12em" }}>
-                                    SARI-IMS ADMIN PORTAL — SECURE SESSION
-                                </span>
-                            </div>
+                        {/* ── STEP 1: Credentials ── */}
+                        {step === "credentials" && (
+                            <motion.div key="credentials"
+                                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
+                                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                                className="w-full max-w-[420px]">
 
-                            {/* Logo + title */}
-                            <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "28px" }}>
-                                <div style={{
-                                    position: "relative", width: 44, height: 44, flexShrink: 0,
-                                    border: "1px solid rgba(0,255,136,0.2)", borderRadius: "4px", padding: "4px",
-                                    background: "rgba(0,255,136,0.04)"
-                                }}>
-                                    <Image src="/images/logo.png" alt="SariSari IMS" fill className="object-contain" style={{ borderRadius: "3px" }} sizes="44px" />
-                                </div>
-                                <div>
-                                    <div className="bebas" style={{ fontSize: "1.8rem", color: "#e2ffe9", letterSpacing: "0.06em", lineHeight: 1 }}>
-                                        ADMIN ACCESS
+                                {/* Mobile logo */}
+                                <Link href="/" className="lg:hidden flex items-center gap-2.5 no-underline mb-8">
+                                    <div className="relative w-8 h-8">
+                                        <Image src="/images/logo.png" alt="Logo" fill className="object-contain rounded-lg" sizes="32px" />
                                     </div>
-                                    <div className="mono" style={{ fontSize: "0.58rem", color: "rgba(0,255,136,0.45)", letterSpacing: "0.25em", marginTop: "3px" }}>
-                                        SARISARI.IMS // RESTRICTED
-                                    </div>
-                                </div>
-                            </div>
+                                    <span className="font-black text-white text-base" style={{ fontFamily: "Syne, sans-serif" }}>
+                                        SariSari<span className="text-emerald-400">.</span>IMS
+                                    </span>
+                                </Link>
 
-                            {/* Restricted badge */}
-                            <div className="restricted-badge">
-                                <ShieldAlert size={12} style={{ color: "#ff5555", flexShrink: 0 }} />
-                                <span className="mono" style={{ fontSize: "0.62rem", color: "rgba(255,85,85,0.8)", letterSpacing: "0.08em" }}>
-                                    AUTHORIZED PERSONNEL ONLY
-                                </span>
-                            </div>
-
-                            {/* Form */}
-                            <motion.form
-                                onSubmit={handleCredentialsSubmit}
-                                noValidate
-                                animate={shake ? { x: [-8, 8, -6, 6, -3, 3, 0] } : { x: 0 }}
-                                transition={{ duration: 0.5 }}
-                            >
-                                <div className="field-wrap">
-                                    <label className="field-label">
-                                        <span style={{ opacity: 0.5 }}>$</span> Identity
-                                    </label>
-                                    <div style={{ position: "relative" }}>
-                                        <AtSign size={15} className={`field-icon${errors.email ? " err" : ""}`} />
-                                        <input
-                                            type="email"
-                                            className={`field-input${errors.email ? " error" : ""}`}
-                                            placeholder="admin@domain.com"
-                                            value={form.email}
-                                            autoComplete="username"
-                                            onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setErrors(v => ({ ...v, email: undefined })); }}
-                                        />
+                                {/* Header */}
+                                <div className="mb-8">
+                                    <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 mb-4"
+                                        style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                                        <Zap size={10} className="text-emerald-400" />
+                                        <span className="text-emerald-400 text-[0.65rem] font-bold uppercase tracking-[0.2em]">Step 1 of 2 · Admin Auth</span>
                                     </div>
-                                    {errors.email && (
-                                        <p className="field-error">
-                                            <XCircle size={11} style={{ flexShrink: 0 }} /> {errors.email}
-                                        </p>
-                                    )}
+                                    <h1 className="font-black leading-[1.1] mb-2"
+                                        style={{ fontFamily: "Syne, sans-serif", fontSize: "2rem", letterSpacing: "-0.03em", color: "#f0fdf4" }}>
+                                        Admin Sign In
+                                    </h1>
+                                    <p className="text-[0.9rem]" style={{ color: "#4b5563" }}>Restricted to authorized administrators only.</p>
                                 </div>
 
-                                <div className="field-wrap">
-                                    <label className="field-label">
-                                        <span style={{ opacity: 0.5 }}>$</span> Passphrase
-                                    </label>
-                                    <div style={{ position: "relative" }}>
-                                        <Lock size={15} className={`field-icon${errors.password ? " err" : ""}`} />
-                                        <input
-                                            type={showPassword ? "text" : "password"}
-                                            className={`field-input${errors.password ? " error" : ""}`}
-                                            placeholder="••••••••••••"
-                                            value={form.password}
-                                            autoComplete="current-password"
-                                            style={{ paddingRight: "44px" }}
-                                            onChange={e => { setForm(f => ({ ...f, password: e.target.value })); setErrors(v => ({ ...v, password: undefined })); }}
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowPassword(v => !v)}
-                                            style={{ position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "rgba(0,255,136,0.35)", padding: 0, transition: "color 0.2s" }}
-                                        >
-                                            {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                                <form onSubmit={handleCredentialsSubmit} noValidate className="space-y-4">
+                                    {/* Email */}
+                                    <div>
+                                        <label className="block text-[0.78rem] font-bold mb-1.5" style={{ color: "#6b7280" }}>Admin Email</label>
+                                        <div className="relative">
+                                            <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                                style={{ color: errors.email ? "#ef4444" : "#374151" }} />
+                                            <input type="email" placeholder="sarisariims77@gmail.com" value={form.email}
+                                                onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setErrors(v => ({ ...v, email: undefined })); }}
+                                                className="w-full pl-10 pr-4 py-3 rounded-xl text-[0.9rem] outline-none transition-all"
+                                                style={{
+                                                    background: "#161b22",
+                                                    color: "#e6edf3",
+                                                    border: errors.email ? "1.5px solid #ef4444" : "1.5px solid #21262d",
+                                                    boxShadow: errors.email ? "0 0 0 3px rgba(239,68,68,0.08)" : "none",
+                                                }}
+                                            />
+                                        </div>
+                                        {errors.email && <p className="text-[0.75rem] text-red-500 mt-1">{errors.email}</p>}
+                                    </div>
+
+                                    {/* Password */}
+                                    <div>
+                                        <label className="block text-[0.78rem] font-bold mb-1.5" style={{ color: "#6b7280" }}>Password</label>
+                                        <div className="relative">
+                                            <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                                style={{ color: errors.password ? "#ef4444" : "#374151" }} />
+                                            <input type={showPassword ? "text" : "password"} placeholder="••••••••" value={form.password}
+                                                onChange={e => { setForm(f => ({ ...f, password: e.target.value })); setErrors(v => ({ ...v, password: undefined })); }}
+                                                className="w-full pl-10 pr-11 py-3 rounded-xl text-[0.9rem] outline-none transition-all"
+                                                style={{
+                                                    background: "#161b22",
+                                                    color: "#e6edf3",
+                                                    border: errors.password ? "1.5px solid #ef4444" : "1.5px solid #21262d",
+                                                    boxShadow: errors.password ? "0 0 0 3px rgba(239,68,68,0.08)" : "none",
+                                                }}
+                                            />
+                                            <button type="button" onClick={() => setShowPassword(v => !v)}
+                                                className="absolute right-3.5 top-1/2 -translate-y-1/2 transition-colors"
+                                                style={{ color: "#4b5563" }}>
+                                                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                            </button>
+                                        </div>
+                                        {errors.password && <p className="text-[0.75rem] text-red-500 mt-1">{errors.password}</p>}
+                                    </div>
+
+                                    {/* Submit */}
+                                    <button type="submit" disabled={loading}
+                                        className="w-full relative overflow-hidden flex items-center justify-center gap-2.5 font-bold text-white py-3.5 rounded-xl transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed mt-2"
+                                        style={{ background: "linear-gradient(135deg, #059669, #047857)", boxShadow: "0 8px 24px rgba(5,150,105,0.3)", fontFamily: "Syne, sans-serif", fontSize: "0.92rem", letterSpacing: "0.01em" }}>
+                                        {loading && (
+                                            <span className="absolute inset-0 pointer-events-none"
+                                                style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)", animation: "shimmerBar 1.5s ease-in-out infinite" }} />
+                                        )}
+                                        {loading ? <Loader2 size={18} className="animate-spin" /> : <><ArrowRight size={16} />Continue to Verification</>}
+                                    </button>
+                                </form>
+
+                                {/* Divider */}
+                                <div className="flex items-center gap-3 my-6">
+                                    <div className="flex-1 h-px" style={{ background: "#21262d" }} />
+                                    <span className="text-[0.7rem] font-semibold" style={{ color: "#30363d" }}>RESTRICTED</span>
+                                    <div className="flex-1 h-px" style={{ background: "#21262d" }} />
+                                </div>
+
+                                {/* Back link */}
+                                <Link href="/auth/login"
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[0.82rem] font-bold no-underline transition-all"
+                                    style={{ color: "#4b5563", border: "1px solid #21262d" }}>
+                                    ← Back to Owner Login
+                                </Link>
+                            </motion.div>
+                        )}
+
+                        {/* ── STEP 2: OTP ── */}
+                        {step === "otp" && (
+                            <motion.div key="otp"
+                                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
+                                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                                className="w-full max-w-[460px]">
+
+                                {/* Icon */}
+                                <div className="flex justify-center mb-6">
+                                    <motion.div
+                                        animate={shake ? { x: [-6, 6, -5, 5, -3, 3, 0] } : { x: 0 }}
+                                        transition={{ duration: 0.55 }}
+                                        className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                                        style={{
+                                            background: attempts > 0 ? "linear-gradient(135deg, #1f0a0a, #2d0f0f)" : "linear-gradient(135deg, #061a14, #0a3d2b)",
+                                            border: attempts > 0 ? "1.5px solid #7f1d1d" : "1.5px solid #065f46",
+                                            transition: "all 0.3s ease",
+                                        }}>
+                                        {attempts > 0
+                                            ? <AlertTriangle size={28} className="text-red-500" />
+                                            : <KeyRound size={28} className="text-emerald-400" />}
+                                    </motion.div>
+                                </div>
+
+                                {/* Header */}
+                                <div className="mb-5 text-center">
+                                    <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 mb-4"
+                                        style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                                        <Zap size={10} className="text-emerald-400" />
+                                        <span className="text-emerald-400 text-[0.65rem] font-bold uppercase tracking-[0.2em]">Step 2 of 2 · Email OTP</span>
+                                    </div>
+                                    <h1 className="font-black leading-[1.1] mb-2"
+                                        style={{ fontFamily: "Syne, sans-serif", fontSize: "1.9rem", letterSpacing: "-0.03em", color: "#f0fdf4" }}>
+                                        Verify Your Identity
+                                    </h1>
+                                    <p className="text-[0.88rem] leading-relaxed" style={{ color: "#4b5563" }}>
+                                        We sent an {OTP_LENGTH}-digit code to<br />
+                                        <span className="font-bold" style={{ color: "#34d399" }}>{form.email}</span>
+                                    </p>
+                                </div>
+
+                                {/* Attempt dots */}
+                                <div className="flex items-center justify-center gap-2 mb-5">
+                                    {Array.from({ length: MAX_ATTEMPTS }).map((_, i) => (
+                                        <div key={i} className="w-2 h-2 rounded-full transition-all duration-300"
+                                            style={{
+                                                background: i < attempts ? "#ef4444" : "#21262d",
+                                                boxShadow: i < attempts ? "0 0 6px rgba(239,68,68,0.5)" : "none",
+                                                transform: i < attempts ? "scale(1.3)" : "scale(1)",
+                                            }} />
+                                    ))}
+                                    <span className="text-[0.72rem] font-semibold ml-1.5"
+                                        style={{ color: attempts === 0 ? "#4b5563" : attempts === 1 ? "#f97316" : "#ef4444" }}>
+                                        {attempts === 0
+                                            ? `${MAX_ATTEMPTS} attempts allowed`
+                                            : `${MAX_ATTEMPTS - attempts} attempt${MAX_ATTEMPTS - attempts === 1 ? "" : "s"} remaining`}
+                                    </span>
+                                </div>
+
+                                <form onSubmit={handleOtpSubmit} noValidate>
+                                    <motion.div
+                                        animate={shake ? { x: [-7, 7, -6, 6, -4, 4, 0] } : { x: 0 }}
+                                        transition={{ duration: 0.55 }}
+                                        className="otp-wrap flex justify-center mb-2"
+                                        style={{ gap: "6px" }}
+                                        onPaste={handleOtpPaste}>
+                                        {otp.map((digit, i) => (
+                                            <input
+                                                key={i}
+                                                id={`otp-${i}`}
+                                                type="text"
+                                                inputMode="numeric"
+                                                maxLength={1}
+                                                value={digit}
+                                                disabled={loading}
+                                                onChange={e => handleOtpChange(i, e.target.value)}
+                                                onKeyDown={e => handleOtpKeyDown(i, e)}
+                                                placeholder="·"
+                                                className="otp-input otp-box text-center font-black rounded-xl outline-none transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                                style={{
+                                                    background: loading ? "#0d1117" : digit ? "#0a1f18" : "#161b22",
+                                                    color: "#34d399",
+                                                    border: errors.otp ? "1.5px solid #ef4444" : digit ? "1.5px solid #065f46" : "1.5px solid #21262d",
+                                                    boxShadow: errors.otp ? "0 0 0 3px rgba(239,68,68,0.08)" : "none",
+                                                    fontFamily: "Syne, sans-serif",
+                                                    transition: "all 0.15s ease",
+                                                }}
+                                            />
+                                        ))}
+                                    </motion.div>
+
+                                    <AnimatePresence>
+                                        {errors.otp && (
+                                            <motion.p key="otp-error"
+                                                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                                                className="text-[0.75rem] text-red-500 text-center font-semibold mb-2 mt-1">
+                                                {errors.otp}
+                                            </motion.p>
+                                        )}
+                                    </AnimatePresence>
+
+                                    <AnimatePresence>
+                                        {loading && (
+                                            <motion.div key="verifying"
+                                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                                className="flex items-center justify-center gap-2 my-3">
+                                                <Loader2 size={14} className="animate-spin text-emerald-500" />
+                                                <span className="text-[0.78rem] font-semibold" style={{ color: "#059669" }}>
+                                                    {attempts >= MAX_ATTEMPTS - 1 && attempts > 0 ? "Redirecting back…" : "Verifying code…"}
+                                                </span>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+
+                                    {/* Resend */}
+                                    <div className="flex items-center justify-center gap-1.5 mb-5 mt-2">
+                                        <span className="text-[0.82rem]" style={{ color: "#4b5563" }}>Didn't receive it?</span>
+                                        <button type="button" onClick={handleResend} disabled={resendCooldown > 0 || loading}
+                                            className="flex items-center gap-1 text-[0.82rem] font-bold transition-colors disabled:cursor-not-allowed"
+                                            style={{ color: resendCooldown > 0 || loading ? "#374151" : "#059669" }}>
+                                            <RefreshCw size={12} />
+                                            {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
                                         </button>
                                     </div>
-                                    {errors.password && (
-                                        <p className="field-error">
-                                            <XCircle size={11} style={{ flexShrink: 0 }} /> {errors.password}
-                                        </p>
-                                    )}
-                                </div>
 
-                                <button type="submit" disabled={loading} className="submit-btn">
-                                    {loading && <span className="shimmer" />}
-                                    {loading
-                                        ? <><Loader2 size={15} className="animate-spin" /> AUTHENTICATING…</>
-                                        : <><Terminal size={14} /> AUTHENTICATE<ChevronRight size={14} /></>
-                                    }
-                                </button>
-                            </motion.form>
-
-                            <hr className="divider" />
-
-                            {/* Footer */}
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                                <span className="mono" style={{ fontSize: "0.6rem", color: "rgba(255,255,255,0.15)", letterSpacing: "0.08em" }}>
-                                    SESSION ENCRYPTED
-                                </span>
-                                <span className="mono" style={{ fontSize: "0.6rem", color: "rgba(255,255,255,0.15)", letterSpacing: "0.08em", display: "flex", alignItems: "center", gap: "4px" }}>
-                                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#00ff88", display: "inline-block", boxShadow: "0 0 6px #00ff88" }} />
-                                    SARI-IMS v1.0
-                                </span>
-                            </div>
-
-                            <Link href="/auth/login" className="portal-link">
-                                <ChevronRight size={11} style={{ transform: "rotate(180deg)" }} />
-                                Owner Portal
-                            </Link>
-                        </motion.div>
-                    )}
-
-                    {/* ── STEP 2: OTP Verification ── */}
-                    {step === "otp" && (
-                        <motion.div
-                            key="otp"
-                            initial={{ opacity: 0, scale: 0.97 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.96 }}
-                            transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                            className="card"
-                        >
-                            {/* Status bar */}
-                            <div className="status-bar">
-                                <span className="status-dot" />
-                                <span className="mono" style={{ fontSize: "0.65rem", color: "rgba(0,255,136,0.6)", letterSpacing: "0.12em" }}>
-                                    TOKEN VERIFICATION REQUIRED
-                                </span>
-                            </div>
-
-                            {/* Icon */}
-                            <div style={{ display: "flex", justifyContent: "center", marginBottom: "20px" }}>
-                                <motion.div
-                                    animate={shake ? { x: [-6, 6, -5, 5, -3, 3, 0] } : { x: 0 }}
-                                    transition={{ duration: 0.5 }}
-                                    style={{
-                                        width: 64, height: 64,
-                                        border: attempts > 0 ? "1px solid rgba(255,60,60,0.35)" : "1px solid rgba(0,255,136,0.25)",
-                                        borderRadius: "4px",
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                        background: attempts > 0 ? "rgba(255,60,60,0.05)" : "rgba(0,255,136,0.05)",
-                                        transition: "all 0.3s ease",
-                                    }}
-                                >
-                                    {attempts > 0
-                                        ? <AlertOctagon size={28} style={{ color: "#ff5555" }} />
-                                        : <KeyRound size={28} style={{ color: "#00ff88" }} />}
-                                </motion.div>
-                            </div>
-
-                            {/* Title */}
-                            <div style={{ textAlign: "center", marginBottom: "20px" }}>
-                                <div className="bebas" style={{ fontSize: "2rem", color: "#e2ffe9", letterSpacing: "0.06em", lineHeight: 1, marginBottom: "8px" }}>
-                                    TOKEN VERIFICATION
-                                </div>
-                                <p className="mono" style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.35)", lineHeight: 1.6, letterSpacing: "0.05em" }}>
-                                    Token dispatched to<br />
-                                    <span style={{ color: "rgba(0,255,136,0.7)", fontWeight: 600 }}>{form.email}</span>
-                                </p>
-                            </div>
-
-                            {/* Attempt indicators */}
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "20px" }}>
-                                {Array.from({ length: MAX_ATTEMPTS }).map((_, i) => (
-                                    <div
-                                        key={i}
-                                        className="attempt-pip"
-                                        style={{
-                                            background: i < attempts ? "#ff5555" : "rgba(255,255,255,0.12)",
-                                            boxShadow: i < attempts ? "0 0 8px rgba(255,85,85,0.6)" : "none",
-                                            transform: i < attempts ? "scale(1.3)" : "scale(1)",
-                                        }}
-                                    />
-                                ))}
-                                <span className="mono" style={{ fontSize: "0.62rem", marginLeft: "6px", letterSpacing: "0.06em", color: attempts === 0 ? "rgba(255,255,255,0.25)" : attempts === 1 ? "#f97316" : "#ff5555" }}>
-                                    {attempts === 0
-                                        ? `${MAX_ATTEMPTS} attempts`
-                                        : `${MAX_ATTEMPTS - attempts} remaining`}
-                                </span>
-                            </div>
-
-                            {/* OTP form */}
-                            <form onSubmit={handleOtpSubmit} noValidate>
-                                <label className="field-label" style={{ display: "block", textAlign: "center", marginBottom: "12px" }}>
-                                    <span style={{ opacity: 0.5 }}>$</span> Enter 8-digit token
-                                </label>
-
-                                <motion.div
-                                    animate={shake ? { x: [-7, 7, -6, 6, -4, 4, 0] } : { x: 0 }}
-                                    transition={{ duration: 0.5 }}
-                                    className="otp-wrap"
-                                    style={{ display: "flex", justifyContent: "center", gap: "7px", marginBottom: "8px" }}
-                                    onPaste={handleOtpPaste}
-                                >
-                                    {otp.map((digit, i) => (
-                                        <input
-                                            key={i}
-                                            id={`otp-${i}`}
-                                            type="text"
-                                            inputMode="numeric"
-                                            maxLength={1}
-                                            value={digit}
-                                            disabled={loading}
-                                            onChange={e => handleOtpChange(i, e.target.value)}
-                                            onKeyDown={e => handleOtpKeyDown(i, e)}
-                                            placeholder="·"
-                                            className={`otp-box${errors.otp ? " err" : ""}${digit ? " filled" : ""}`}
-                                        />
-                                    ))}
-                                </motion.div>
-
-                                <AnimatePresence>
-                                    {errors.otp && (
-                                        <motion.p
-                                            key="otp-err"
-                                            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                                            className="field-error"
-                                            style={{ justifyContent: "center", marginBottom: "4px" }}
-                                        >
-                                            <XCircle size={11} /> {errors.otp}
-                                        </motion.p>
-                                    )}
-                                </AnimatePresence>
-
-                                <AnimatePresence>
-                                    {loading && (
-                                        <motion.div
-                                            key="loading"
-                                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", margin: "10px 0" }}
-                                        >
-                                            <Loader2 size={13} className="animate-spin" style={{ color: "#00ff88" }} />
-                                            <span className="mono" style={{ fontSize: "0.7rem", color: "#00ff88", letterSpacing: "0.1em" }}>
-                                                {attempts >= MAX_ATTEMPTS - 1 && attempts > 0 ? "TERMINATING SESSION…" : "VERIFYING TOKEN…"}
-                                            </span>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-
-                                {/* Resend */}
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", margin: "12px 0" }}>
-                                    <span className="mono" style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.25)" }}>No token received?</span>
-                                    <button
-                                        type="button"
-                                        onClick={handleResend}
-                                        disabled={resendCooldown > 0 || loading}
-                                        className="resend-btn"
-                                        style={{ color: resendCooldown > 0 || loading ? "rgba(255,255,255,0.2)" : "rgba(0,255,136,0.7)" }}
-                                    >
-                                        <RefreshCw size={11} />
-                                        {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend token"}
+                                    <button type="submit" disabled={loading || otp.join("").length < OTP_LENGTH}
+                                        className="w-full relative overflow-hidden flex items-center justify-center gap-2.5 font-bold text-white py-3.5 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        style={{ background: "linear-gradient(135deg, #059669, #047857)", boxShadow: "0 8px 24px rgba(5,150,105,0.3)", fontFamily: "Syne, sans-serif", fontSize: "0.92rem" }}>
+                                        {loading && (
+                                            <span className="absolute inset-0 pointer-events-none"
+                                                style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)", animation: "shimmerBar 1.5s ease-in-out infinite" }} />
+                                        )}
+                                        {loading ? <Loader2 size={18} className="animate-spin" /> : <><ShieldCheck size={16} />Verify & Enter Admin Panel</>}
                                     </button>
-                                </div>
+                                </form>
 
                                 <button
-                                    type="submit"
-                                    disabled={loading || otp.join("").length < OTP_LENGTH}
-                                    className="submit-btn"
-                                >
-                                    {loading && <span className="shimmer" />}
-                                    {loading
-                                        ? <><Loader2 size={15} className="animate-spin" /> VERIFYING…</>
-                                        : <><CheckCircle2 size={14} /> CONFIRM ACCESS<ChevronRight size={14} /></>
-                                    }
+                                    onClick={() => { setStep("credentials"); setOtp(Array(OTP_LENGTH).fill("")); setAttempts(0); setErrors({}); autoSubmitRef.current = false; }}
+                                    disabled={loading}
+                                    className="w-full mt-3 py-3 text-[0.85rem] font-semibold transition-colors rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
+                                    style={{ color: "#4b5563" }}>
+                                    ← Back to credentials
                                 </button>
-                            </form>
+                            </motion.div>
+                        )}
 
-                            <button
-                                onClick={() => { setStep("credentials"); setOtp(Array(OTP_LENGTH).fill("")); setAttempts(0); setErrors({}); autoSubmitRef.current = false; }}
-                                disabled={loading}
-                                className="back-btn"
-                            >
-                                ← ABORT — Return to auth
-                            </button>
-                        </motion.div>
-                    )}
-
-                </AnimatePresence>
+                    </AnimatePresence>
+                </main>
             </div>
         </>
     );
