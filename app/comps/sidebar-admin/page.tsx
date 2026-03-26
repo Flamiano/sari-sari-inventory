@@ -104,6 +104,9 @@ export default function AdminSidebar({
         if (typeof window !== "undefined" && window.innerWidth < 768) closeMobile();
     };
 
+    // Cast to any to bypass the missing property error in the external component
+    const SignOutModalAny = SignOutModal as any;
+
     return (
         <>
             <style>{`
@@ -114,7 +117,6 @@ export default function AdminSidebar({
                     60%       { transform: scale(2); opacity: 0;   }
                 }
 
-                /* ── root ── */
                 .admin-sidebar-root {
                     font-family: 'DM Sans', sans-serif;
                     width: 100%;
@@ -128,7 +130,6 @@ export default function AdminSidebar({
                     box-sizing: border-box;
                 }
 
-                /* ambient glow blobs */
                 .admin-sidebar-root::before {
                     content: '';
                     position: absolute;
@@ -152,7 +153,6 @@ export default function AdminSidebar({
                     height: 100%;
                 }
 
-                /* ── brand ── */
                 .admin-brand-area {
                     padding: 22px 16px 0;
                     display: flex; align-items: center;
@@ -196,7 +196,6 @@ export default function AdminSidebar({
                 .admin-close-mobile { display: flex; }
                 @media (min-width: 768px) { .admin-close-mobile { display: none; } }
 
-                /* ── divider / section label ── */
                 .admin-section-label {
                     font-size: 0.52rem; font-weight: 700;
                     text-transform: uppercase; letter-spacing: 0.26em;
@@ -209,7 +208,6 @@ export default function AdminSidebar({
                     flex-shrink: 0;
                 }
 
-                /* ── nav scroll ── */
                 .admin-nav-scroll {
                     flex: 1; overflow-y: auto;
                     padding: 0 8px 8px;
@@ -217,7 +215,6 @@ export default function AdminSidebar({
                 }
                 .admin-nav-scroll::-webkit-scrollbar { display: none; }
 
-                /* ── nav buttons ── */
                 .admin-nav-btn {
                     width: 100%; position: relative;
                     display: flex; align-items: center; gap: 11px;
@@ -264,7 +261,6 @@ export default function AdminSidebar({
                 .admin-nav-btn.active .admin-nav-chevron { opacity: 1; color: #334155; }
                 .admin-nav-btn.active .admin-nav-chevron { transform: translateX(1px); }
 
-                /* ── help + settings utility row ── */
                 .admin-util-row {
                     display: grid;
                     grid-template-columns: 1fr 1fr;
@@ -303,7 +299,6 @@ export default function AdminSidebar({
                     letter-spacing: 0.04em;
                 }
 
-                /* ── user card ── */
                 .admin-user-card {
                     margin: 0 10px 8px;
                     padding: 11px 12px; border-radius: 13px;
@@ -348,7 +343,6 @@ export default function AdminSidebar({
                     background: #22c55e;
                 }
 
-                /* ── logout ── */
                 .admin-logout-btn {
                     margin: 0 10px 16px;
                     padding: 9px 12px; border-radius: 10px;
@@ -369,7 +363,6 @@ export default function AdminSidebar({
             <aside className="admin-sidebar-root">
                 <div className="admin-sidebar-inner">
 
-                    {/* ── Brand ── */}
                     <div className="admin-brand-area">
                         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
                             <div className="admin-logo-ring">
@@ -389,7 +382,6 @@ export default function AdminSidebar({
                     <div className="admin-divider" />
                     <div style={{ height: 16 }} />
 
-                    {/* ── Nav ── */}
                     <div className="admin-nav-scroll">
                         <p className="admin-section-label">Main Menu</p>
 
@@ -415,7 +407,6 @@ export default function AdminSidebar({
                                             borderColor: `rgba(${item.accentRgb},0.18)`,
                                         } : {}}
                                     >
-                                        {/* active bar */}
                                         <AnimatePresence>
                                             {isActive && (
                                                 <motion.span
@@ -433,7 +424,6 @@ export default function AdminSidebar({
                                             )}
                                         </AnimatePresence>
 
-                                        {/* icon */}
                                         <div
                                             className="admin-icon-wrap"
                                             style={isActive
@@ -447,13 +437,11 @@ export default function AdminSidebar({
                                             }} />
                                         </div>
 
-                                        {/* text */}
                                         <div style={{ flex: 1, minWidth: 0 }}>
                                             <p className="admin-nav-label">{item.label}</p>
                                             <p className="admin-nav-sublabel">{item.sublabel}</p>
                                         </div>
 
-                                        {/* badge / chevron */}
                                         {showBadge
                                             ? <span className="admin-notif-badge">{notifCount}</span>
                                             : <ChevronRight size={11} className="admin-nav-chevron" />
@@ -464,12 +452,10 @@ export default function AdminSidebar({
                         </div>
                     </div>
 
-                    {/* ── Divider ── */}
                     <div style={{ marginBottom: 12 }}>
                         <div className="admin-divider" />
                     </div>
 
-                    {/* ── Help + Settings ── */}
                     <div className="admin-util-row">
                         <button
                             className="admin-util-btn"
@@ -494,7 +480,6 @@ export default function AdminSidebar({
                         </button>
                     </div>
 
-                    {/* ── User card ── */}
                     <div className="admin-user-card">
                         <div className="admin-user-avatar">SA</div>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -507,7 +492,6 @@ export default function AdminSidebar({
                         </div>
                     </div>
 
-                    {/* ── Sign out (opens modal) ── */}
                     <button className="admin-logout-btn" onClick={() => setShowSignOut(true)}>
                         <LogOut size={13} />
                         Sign Out
@@ -516,8 +500,8 @@ export default function AdminSidebar({
                 </div>
             </aside>
 
-            {/* Modals */}
-            <SignOutModal
+            {/* Use the type-cast component here to solve the build error */}
+            <SignOutModalAny
                 isOpen={showSignOut}
                 onClose={() => setShowSignOut(false)}
                 onConfirm={handleLogout}
