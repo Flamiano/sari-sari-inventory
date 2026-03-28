@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import {
     LayoutDashboard, Store, Package, Users,
     ShieldAlert, FileText, LogOut, X, ChevronRight,
     HelpCircle, Settings,
+    ChevronLeft,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/app/utils/supabase";
@@ -365,16 +367,46 @@ export default function AdminSidebar({
 
                     <div className="admin-brand-area">
                         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                            <div className="admin-logo-ring">
-                                <Store size={18} color="white" />
+                            {/* Logo Container */}
+                            <div className="admin-logo-ring" style={{ position: "relative", overflow: "hidden" }}>
+                                <Image
+                                    src="/images/logo.png"
+                                    alt="SariSari IMS"
+                                    fill
+                                    className="object-contain p-1.5" // Keeps logo centered and within bounds
+                                    priority // Loads logo immediately
+                                    onError={(e) => {
+                                        const t = e.currentTarget as HTMLImageElement;
+                                        t.style.opacity = "0"; // Hide broken image gracefully
+                                        // Show the fallback icon if defined in CSS or via sibling
+                                    }}
+                                />
+                                {/* Fallback Icon (Visible only if Image fails or is transparent) */}
+                                <Store
+                                    size={18}
+                                    color="white"
+                                    style={{ position: "absolute", zIndex: -1 }}
+                                />
                             </div>
+
                             <div>
-                                <p className="admin-brand-text-main">SariSari<span>.</span>IMS</p>
+                                <p className="admin-brand-text-main">
+                                    SariSari<span className="text-blue-500">.</span>IMS
+                                </p>
                                 <p className="admin-brand-text-sub">Super Admin</p>
                             </div>
                         </div>
-                        <button className="admin-close-btn admin-close-mobile" onClick={closeMobile}>
-                            <X size={13} />
+
+                        <button
+                            className="flex items-center justify-center rounded-sm 
+                                bg-white/5 border border-white/10 text-slate-400 
+                                hover:bg-white/10 hover:text-white hover:-translate-x-0.5
+                                active:scale-95 transition-all duration-200
+                                lg:hidden" 
+                            onClick={closeMobile}
+                            aria-label="Close sidebar"
+                        >
+                            <ChevronLeft size={16} strokeWidth={2.5} />
                         </button>
                     </div>
 
